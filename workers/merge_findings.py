@@ -1,23 +1,149 @@
-"""MERGE_FINDINGS Worker。对应架构文档 05-finding-model.md「Finding 三层模型」与 07-risk-fusion.md「后处理流水线」。职责：指纹计算 + 历史匹配 + Finding upsert。"""
+"""MERGE_FINDINGS Worker。对应 05/07-finding-model.md。
 
+指纹归一化 + Finding upsert + FindingInstance 创建。AI 结论已由 AI_ANALYZE 产出。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.logging import get_logger
+from app.domain.finding import AiReview, Finding, FindingCandidate, FindingInstance, Rule
+from app.domain.scan_run import ScanRun, ScanStageRun, STAGE_RUNNING, STAGE_SUCCEEDED
+from app.domain.source_assets import SourceRevision
 from workers.celery_app import celery_app
+
+logger = get_logger("MergeFindingsWorker")
+
+
+def merge_findings(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
+    scan_run = db.get(ScanRun, scan_run_id)
+    if not scan_run:
+        return {"status": "FAILED", "error_code": "SCAN_NOT_FOUND"}
+
+    source_rev = db.get(SourceRevision, scan_run.source_revision_id)
+    if not source_rev:
+        return {"status": "FAILED", "error_code": "SOURCE_NOT_FOUND"}
+
+    _set_stage(db, scan_run_id, "MERGE_FINDINGS", STAGE_RUNNING)
+
+    candidates = db.execute(
+        select(FindingCandidate).where(FindingCandidate.scan_run_id == scan_run_id)
+    ).scalars().all()
+    reviews = {r.candidate_id: r for r in db.execute(
+        select(AiReview).where(
+            AiReview.candidate_id.in_([c.id for c in candidates])
+        )
+    ).scalars().all()} if candidates else {}
+    # 预载 rule_id → rule_key，供可读标题
+    rule_ids = {c.rule_id for c in candidates if c.rule_id}
+    rules = {r.id: r.rule_key for r in db.execute(
+        select(Rule).where(Rule.id.in_(rule_ids))
+    ).scalars().all()} if rule_ids else {}
+
+    new_count = 0
+    instance_ids: list[int] = []
+    finding_ids: list[int] = []
+
+    for cand in candidates:
+        review = reviews.get(cand.id)
+        # 指纹匹配历史 Finding（同仓库同指纹）
+        finding = db.execute(
+            select(Finding).where(
+                Finding.repository_id == scan_run.repository_id,
+                Finding.fingerprint == cand.fingerprint,
+            )
+        ).scalar_one_or_none()
+
+        if finding is None:
+            finding = Finding(
+                repository_id=scan_run.repository_id,
+                fingerprint=cand.fingerprint,
+                rule_id=cand.rule_id,
+                severity=cand.raw_severity,
+                status="OPEN",
+                first_seen_scan_id=scan_run_id,
+                last_seen_scan_id=scan_run_id,
+                first_seen_commit=source_rev.commit_sha,
+                last_seen_commit=source_rev.commit_sha,
+                api_asset_id=cand.api_asset_id,
+                title=_title(cand, rules),
+                description=f"{cand.symbol} in {cand.file_path}:{cand.start_line}",
+            )
+            db.add(finding)
+            db.flush()
+            finding_ids.append(finding.id)
+            new_count += 1
+        else:
+            finding.last_seen_scan_id = scan_run_id
+            finding.last_seen_commit = source_rev.commit_sha
+            if finding.status == "FIXED":
+                finding.status = "REAPPEARED"
+
+        # AI verdict 影响 finding 状态
+        ai_verdict = review.verdict if review else None
+        if ai_verdict in ("FALSE_POSITIVE", "LIKELY_FALSE_POSITIVE"):
+            finding.status = "FALSE_POSITIVE"
+
+        instance = FindingInstance(
+            finding_id=finding.id,
+            scan_run_id=scan_run_id,
+            source_revision_id=source_rev.id,
+            candidate_id=cand.id,
+            file_path=cand.file_path,
+            start_line=cand.start_line,
+            end_line=cand.end_line,
+            symbol=cand.symbol,
+            api_asset_id=cand.api_asset_id,
+            raw_severity=cand.raw_severity,
+            ai_verdict=ai_verdict,
+            ai_confidence=review.confidence if review else None,
+            status="NEW",
+        )
+        db.add(instance)
+        db.flush()
+        instance_ids.append(instance.id)
+
+    _set_stage(db, scan_run_id, "MERGE_FINDINGS", STAGE_SUCCEEDED, metrics={
+        "new_count": new_count, "instance_count": len(instance_ids),
+        "finding_count": len(finding_ids),
+    })
+    db.commit()
+    logger.info("merge_findings_done", new=new_count, instances=len(instance_ids))
+    return {"status": "SUCCEEDED", "output": {"new_count": new_count,
+            "instance_count": len(instance_ids)}}
+
+
+def _title(cand: FindingCandidate, rules: dict[int, str]) -> str:
+    rule_key = rules.get(cand.rule_id, "vulnerability")
+    # symbol 形如 "path/to/File.java::methodName"，取方法名做标题
+    method = (cand.symbol or "").split("::")[-1] or cand.file_path
+    return f"{rule_key} in {method}"
+
+
+def _set_stage(db: Session, scan_run_id: int, stage_type: str, status: str, metrics: dict | None = None) -> None:
+    stage = db.execute(
+        select(ScanStageRun).where(
+            ScanStageRun.scan_run_id == scan_run_id,
+            ScanStageRun.stage_type == stage_type,
+        )
+    ).scalar_one_or_none()
+    if stage:
+        stage.status = status
+        if status == STAGE_RUNNING:
+            stage.started_at = datetime.now(timezone.utc)
+        elif status == STAGE_SUCCEEDED:
+            stage.finished_at = datetime.now(timezone.utc)
+            if metrics:
+                stage.metrics_json = metrics
+        db.flush()
 
 
 @celery_app.task(name="sail.MERGE_FINDINGS")
 def run_stage(scan_run_id: int, stage_run_id: int) -> dict:
-    """指纹归一化、历史匹配并 upsert Finding + 创建 FindingInstance。
-
-    输入：finding_candidates + ai_reviews + api_assets。
-    流程（07-risk-fusion 后处理流水线）：Schema 校验 → 路径/符号标准化 →
-    指纹计算 → 扫描内去重 → 历史匹配 → Endpoint 绑定 → AI 结论融合。
-    归并逻辑（ADR-05）：
-      1. 用 candidate.fingerprint 匹配历史 finding；
-      2. 命中→复用 finding_id，未命中→新建 Finding（upsert）；
-      3. 创建 FindingInstance 关联 candidate + finding。
-    历史对比：未存在→NEW；上次 OPEN→RECURRING；上次 FIXED→REAPPEARED；
-    上次 FALSE_POSITIVE→保留不再 AI 分析。
-    输出：``{"status": "SUCCEEDED", "output": {"finding_ids": [<int>...],
-    "instance_ids": [<int>...], "new_count": <int>, "recurring_count": <int>}}``。
-    required=✓，on_failure=ABORT。
-    """
-    raise NotImplementedError
+    from app.infrastructure.database import SessionLocal
+    with SessionLocal() as db:
+        return merge_findings(scan_run_id, stage_run_id, db)

@@ -85,11 +85,12 @@ def extract_api_facts(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
             continue
         try:
             tree = _parser.parse(java_file.read_bytes())
-            assets, controls = _extract_from_tree(tree, java_file, workspace, scan_run, source_rev)
+            assets, rel_path = _extract_from_tree(tree, java_file, workspace, scan_run, source_rev, db)
             for a in assets:
                 db.add(a)
                 api_count += 1
-            db.flush()
+            db.flush()  # 取到 asset.id
+            controls = _build_security_controls(assets, tree, scan_run, rel_path, db)
             for c in controls:
                 db.add(c)
                 ctrl_count += 1
@@ -118,9 +119,13 @@ def extract_api_facts(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
     }
 
 
-def _extract_from_tree(tree, file_path, source_root, scan_run, source_rev):
-    assets = []
-    controls = []
+def _extract_from_tree(tree, file_path, source_root, scan_run, source_rev, db):
+    """提取一个文件内的所有 Controller handler 为 ApiAsset + 关联 ApiSecurityControl。
+
+    安全控制按方法绑定：每个 handler 方法上的 @PreAuthorize/@Valid 等注解
+    生成一条 ApiSecurityControl，api_asset_id 指向该方法对应的 ApiAsset。
+    """
+    assets: list[ApiAsset] = []
     rel_path = str(file_path.relative_to(source_root))
 
     for node in _walk(tree.root_node):
@@ -183,33 +188,41 @@ def _extract_from_tree(tree, file_path, source_root, scan_run, source_rev):
             )
             assets.append(asset)
 
-            for ann in method_annotations:
-                if ann["name"] in SECURITY_ANNOTATIONS:
-                    ctrl_type, ctrl_method = SECURITY_ANNOTATIONS[ann["name"]]
-                    controls.append((ctrl_type, ctrl_method, ann.get("value", ""), start_line))
-
-    # 关联安全控制到 API
-    for i, (ctrl_type, ctrl_method, ctrl_value, line) in enumerate(controls):
-        asset_id = assets[i % len(assets)].id if assets else 0
-        controls_obj = ApiSecurityControl(
-            api_asset_id=asset_id,
-            scan_run_id=scan_run.id,
-            control_type=ctrl_type,
-            control_method=ctrl_method,
-            control_value=ctrl_value,
-            scope="METHOD",
-            file_path=rel_path,
-            line=line,
-            enforced=True,
-        )
-        # 需要 flush 后才有 id
-        db_add_later.append(controls_obj) if False else None
-
-    return assets, [(c[0], c[1], c[2], c[3]) for c in controls]
+    return assets, rel_path
 
 
-# 临时存储（简化处理）
-_db_add_later = []
+def _build_security_controls(assets: list[ApiAsset], tree, scan_run, rel_path, db) -> list:
+    """为每个 ApiAsset 收集其 handler 方法上的安全控制注解并持久化。
+
+    通过 start_line 把 asset 与 method_declaration 对齐。
+    """
+    controls: list[ApiSecurityControl] = []
+    # asset 按 start_line 索引，便于匹配方法
+    asset_by_line = {a.start_line: a for a in assets if a.start_line}
+
+    for node in _walk(tree.root_node):
+        if node.type != "method_declaration":
+            continue
+        method_line = node.start_point[0] + 1
+        asset = asset_by_line.get(method_line)
+        if asset is None:
+            continue
+        method_annotations = _get_annotations(node)
+        for ann in method_annotations:
+            if ann["name"] in SECURITY_ANNOTATIONS:
+                ctrl_type, ctrl_method = SECURITY_ANNOTATIONS[ann["name"]]
+                controls.append(ApiSecurityControl(
+                    api_asset_id=asset.id,
+                    scan_run_id=scan_run.id,
+                    control_type=ctrl_type,
+                    control_method=ctrl_method,
+                    control_value=ann.get("value", ""),
+                    scope="METHOD",
+                    file_path=rel_path,
+                    line=method_line,
+                    enforced=True,
+                ))
+    return controls
 
 
 def _walk(node):

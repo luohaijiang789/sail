@@ -46,6 +46,7 @@ git 代码仓 → SAIL 拉取 + 编译
 | 9 | [09-api-frontend](docs/09-api-frontend.md) | REST API + SSE + 前端页面 |
 | 10 | [10-platform](docs/10-platform.md) | 队列 + 日志 + 隔离 + 部署 |
 | 11 | [11-roadmap](docs/11-roadmap.md) | 五阶段落地路线 |
+| 12 | [12-implementation-status](docs/12-implementation-status.md) | **已实现内容 + 降级路径 + 运行指南 + WebGoat 验证结果** |
 | 附录 | [appendix-adr](docs/appendix-adr.md) | 24 条架构决策记录 |
 
 ## 七条设计原则
@@ -78,4 +79,21 @@ FastAPI · Celery · MySQL · Redis · MinIO · CodeQL CLI · Tree-sitter · Vue
 
 ## 当前状态
 
-架构设计阶段。第一阶段启动前置见 [11-roadmap](docs/11-roadmap.md)。
+**阶段一最小闭环已跑通**——13 阶段 DAG 端到端在 WebGoat 验证通过：
+
+```
+198 API 资产 → 3960 check 结果 + 198 安全画像 → 5 真实漏洞（SQL注入/路径遍历）
+```
+
+- CodeQL 未就绪时，扫描自动降级为内置 Tree-sitter 污点分析（仍产出真实 source→sink 候选）
+- LLM key 未配时，AI 验证自动降级为规则启发式（仍产出结构化判定）
+- 装 CodeQL CLI + 配 LLM key 后，无需改代码即切真实路径
+
+详见 [12-implementation-status](docs/12-implementation-status.md)。
+
+### 快速运行
+
+```bash
+.venv/bin/python scripts/run_scan.py            # 脚本一键端到端
+.venv/bin/uvicorn app.main:app --port 8000      # API 服务（POST /api/scans/ 触发）
+```

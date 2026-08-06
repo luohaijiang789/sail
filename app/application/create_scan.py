@@ -125,7 +125,8 @@ def _dispatch_start_scan(scan_run_id: int) -> None:
     """派发 start_scan 任务。
 
     优先通过 Celery ``send_task("sail.start_scan")`` 派发；若 Celery 不可用
-    （Redis 未连、broker 报错）则回退到 print 模拟，保证本地开发不阻塞。
+    （Redis 未连、broker 报错）则回退到**后台线程同步执行** ``run_scan_synchronous``，
+    保证本地开发（无 Celery/Redis）也能通过 API 触发真实扫描。
     消息只传 scan_run_id（ADR-03），状态机在 ScanRun 上。
     """
     try:
@@ -133,6 +134,15 @@ def _dispatch_start_scan(scan_run_id: int) -> None:
 
         celery_app.send_task("sail.start_scan", args=[scan_run_id], queue="scan_orchestrator")
         logger.info("start_scan_dispatched_via_celery", scan_run_id=scan_run_id)
-    except Exception:  # noqa: BLE001  Celery / Redis 不可用时回退
-        print(f"[create_scan] would dispatch start_scan(scan_run_id={scan_run_id})")
-        logger.info("start_scan_dispatched_fallback", scan_run_id=scan_run_id)
+    except Exception:  # noqa: BLE001  Celery / Redis 不可用时回退到线程同步执行
+        import threading
+
+        def _run() -> None:
+            try:
+                from app.application.orchestrate_scan import run_scan_synchronous
+                run_scan_synchronous(scan_run_id)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("sync_scan_failed", scan_run_id=scan_run_id, error=str(e))
+
+        threading.Thread(target=_run, daemon=True, name=f"sail-scan-{scan_run_id}").start()
+        logger.info("start_scan_dispatched_via_thread", scan_run_id=scan_run_id)
