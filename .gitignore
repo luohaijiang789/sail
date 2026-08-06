@@ -41,3 +41,15 @@ docker/.env
 # 工具二进制（不进 git）
 .tools/
 .env.tools
+
+# 本地开发数据库
+sail.db
+sail.db-journal
+*.db
+*.db-journal
+
+# 虚拟环境
+.venv/
+
+# 工作区
+/tmp/sail-workspaces/
