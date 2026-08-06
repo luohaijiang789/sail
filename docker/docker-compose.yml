@@ -1,0 +1,115 @@
+version: "3.8"
+
+services:
+  # --- 基础设施 ---
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: sailroot
+      MYSQL_DATABASE: sail
+      MYSQL_USER: sail
+      MYSQL_PASSWORD: sail
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks: [internal]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sail
+      MINIO_ROOT_PASSWORD: sail123456
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks: [internal]
+
+  # --- SAIL 服务 ---
+  sail-api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+      SAIL_MINIO_ACCESS_KEY: sail
+      SAIL_MINIO_SECRET_KEY: sail123456
+    ports:
+      - "8000:8000"
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  sail-worker-fetch:
+    build: .
+    command: celery -A workers.celery_app worker -Q source_fetch -c 4 -n fetch@%h
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  sail-worker-build:
+    build: .
+    command: celery -A workers.celery_app worker -Q java_build_jdk17 -c 2 -n build@%h
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  sail-worker-codeql:
+    build: .
+    command: celery -A workers.celery_app worker -Q codeql_query -c 2 -n codeql@%h
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  sail-worker-ai:
+    build: .
+    command: celery -A workers.celery_app worker -Q ai_analysis -c 4 -n ai@%h
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  sail-worker-postprocess:
+    build: .
+    command: celery -A workers.celery_app worker -Q result_process,source_extract -c 4 -n post@%h
+    environment:
+      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+    depends_on: [mysql, redis, minio]
+    networks: [internal]
+
+  flower:
+    image: mher/flower:latest
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on: [redis]
+    networks: [internal]
+
+volumes:
+  mysql-data:
+  minio-data:
+
+networks:
+  internal:
