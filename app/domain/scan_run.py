@@ -45,7 +45,7 @@ STAGE_FINALIZE = "FINALIZE"
 class ScanRun(Base, TimestampMixin):
     __tablename__ = "scan_run"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("project.id"), nullable=False)
     repository_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("repository.id"), nullable=False)
     source_revision_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("source_revision.id"))
@@ -68,7 +68,7 @@ class ScanRun(Base, TimestampMixin):
 class ScanStageRun(Base, TimestampMixin):
     __tablename__ = "scan_stage_run"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False, index=True)
     stage_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=STAGE_PENDING)

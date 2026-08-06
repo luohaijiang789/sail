@@ -16,11 +16,13 @@ from app.config import Settings, settings
 from app.core.exceptions import (
     ApiAssetNotFoundError,
     FindingNotFoundError,
+    RepositoryNotFoundError,
     ScanRunNotFoundError,
 )
 from app.domain.api_asset import ApiAsset
 from app.domain.finding import Finding
 from app.domain.scan_run import ScanRun
+from app.domain.source_assets import Repository
 from app.infrastructure.database import get_db
 from app.infrastructure.object_storage import minio_client
 from app.infrastructure.redis_client import redis_client
@@ -63,3 +65,11 @@ def require_finding(finding_id: int, db: Session = Depends(get_db)) -> Finding:
     if finding is None:
         raise FindingNotFoundError(f"Finding {finding_id} not found")
     return finding
+
+
+def require_repository(repository_id: int, db: Session = Depends(get_db)) -> Repository:
+    """路径参数 ``repository_id`` → ``Repository``，不存在抛 404。"""
+    repository = db.get(Repository, repository_id)
+    if repository is None:
+        raise RepositoryNotFoundError(f"Repository {repository_id} not found")
+    return repository

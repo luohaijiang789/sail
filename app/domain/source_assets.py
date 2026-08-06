@@ -14,7 +14,7 @@ from app.domain import Base, TimestampMixin
 class Project(Base, TimestampMixin):
     __tablename__ = "project"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     owner: Mapped[str | None] = mapped_column(String(100))
@@ -26,7 +26,7 @@ class Project(Base, TimestampMixin):
 class Repository(Base, TimestampMixin):
     __tablename__ = "repository"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("project.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     git_url: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -43,9 +43,9 @@ class Repository(Base, TimestampMixin):
 class SourceRevision(Base, TimestampMixin):
     __tablename__ = "source_revision"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     repository_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("repository.id"), nullable=False)
-    commit_sha: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(40), index=True)
     branch: Mapped[str | None] = mapped_column(String(100))
     tag: Mapped[str | None] = mapped_column(String(100))
     commit_time: Mapped[datetime | None] = mapped_column(DateTime)
@@ -60,7 +60,7 @@ class SourceRevision(Base, TimestampMixin):
 class Artifact(Base, TimestampMixin):
     __tablename__ = "artifact"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("project.id"))
     scan_run_id: Mapped[int | None] = mapped_column(BigInteger)
     source_revision_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("source_revision.id"))
@@ -77,7 +77,7 @@ class Artifact(Base, TimestampMixin):
 class CodeQLDatabase(Base, TimestampMixin):
     __tablename__ = "codeql_database"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     source_revision_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("source_revision.id"), nullable=False)
     build_plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     codeql_version: Mapped[str] = mapped_column(String(20), nullable=False)

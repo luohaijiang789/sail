@@ -153,6 +153,12 @@ class ScanRunCancelledError(OrchestratorError):
     http_status = 409
 
 
+class StageNotFoundError(OrchestratorError):
+    """ScanStageRun 不存在。"""
+    error_code = "STAGE_NOT_FOUND"
+    http_status = 404
+
+
 # === 资源未找到 ===
 
 class ApiAssetNotFoundError(SailError):

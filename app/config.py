@@ -1,11 +1,15 @@
 """SAIL 配置。从环境变量读取。"""
 
+import os
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # --- 基础设施 ---
-    mysql_url: str = "mysql+pymysql://sail:sail@localhost:3306/sail"
+    # 本地开发默认 SQLite，生产用 MySQL（docker-compose 注入 SAIL_MYSQL_URL）
+    mysql_url: str = f"sqlite:///{Path('./sail.db').absolute()}"
     redis_url: str = "redis://localhost:6379/0"
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "sail"
@@ -14,7 +18,7 @@ class Settings(BaseSettings):
 
     # --- CodeQL ---
     codeql_cli_path: str = "codeql"
-    workspace_root: str = "/workspaces"
+    workspace_root: str = "/tmp/sail-workspaces"
 
     # --- LLM ---
     llm_provider: str = "openai"
@@ -34,3 +38,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

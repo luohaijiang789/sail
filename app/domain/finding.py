@@ -9,7 +9,7 @@ from app.domain import Base, TimestampMixin
 class RulePack(Base, TimestampMixin):
     __tablename__ = "rule_pack"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     version: Mapped[str] = mapped_column(String(20), nullable=False)
     codeql_pack_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -21,7 +21,7 @@ class RulePack(Base, TimestampMixin):
 class Rule(Base, TimestampMixin):
     __tablename__ = "rule"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     rule_pack_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rule_pack.id"), nullable=False)
     rule_key: Mapped[str] = mapped_column(String(100), nullable=False)  # java/sql-injection
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -37,7 +37,7 @@ class Rule(Base, TimestampMixin):
 class FindingCandidate(Base, TimestampMixin):
     __tablename__ = "finding_candidate"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False, index=True)
     scanner_id: Mapped[str | None] = mapped_column(String(100))
     scanner_version: Mapped[str | None] = mapped_column(String(20))
@@ -63,7 +63,7 @@ class FindingCandidate(Base, TimestampMixin):
 class Finding(Base, TimestampMixin):
     __tablename__ = "finding"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     repository_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("repository.id"), nullable=False, index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     rule_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("rule.id"))
@@ -82,7 +82,7 @@ class Finding(Base, TimestampMixin):
 class FindingInstance(Base, TimestampMixin):
     __tablename__ = "finding_instance"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     finding_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("finding.id"), nullable=False, index=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     source_revision_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("source_revision.id"), nullable=False)
@@ -103,7 +103,7 @@ class FindingInstance(Base, TimestampMixin):
 class AiReview(Base, TimestampMixin):
     __tablename__ = "ai_review"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("finding_candidate.id"), nullable=False, index=True)
     api_asset_id: Mapped[int | None] = mapped_column(BigInteger)
     model_provider: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -129,7 +129,7 @@ class AiReview(Base, TimestampMixin):
 class FeedbackAnalysis(Base, TimestampMixin):
     __tablename__ = "feedback_analysis"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_check_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_check.id"), nullable=False)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     human_verdict: Mapped[str] = mapped_column(String(30), nullable=False)

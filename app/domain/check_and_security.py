@@ -17,7 +17,7 @@ CHECK_NOT_CHECKED = "NOT_CHECKED"
 class ApiCheck(Base, TimestampMixin):
     __tablename__ = "api_check"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_asset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_asset.id"), nullable=False, index=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     source_revision_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("source_revision.id"), nullable=False)
@@ -34,7 +34,7 @@ class ApiCheck(Base, TimestampMixin):
 class ApiSecurityProfile(Base, TimestampMixin):
     __tablename__ = "api_security_profile"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_asset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_asset.id"), nullable=False, index=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     source_revision_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("source_revision.id"), nullable=False)

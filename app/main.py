@@ -3,8 +3,14 @@
 from fastapi import FastAPI
 
 from app.api import api_assets, feedback, findings, internal, repositories, scans
+from app.api.errors import register_exception_handlers
+from app.core.logging import setup_logging
 
 app = FastAPI(title="SAIL", description="Java 仓库的 CodeQL + AI 漏洞扫描平台", version="0.1.0")
+
+# 启动时注册统一异常处理器与结构化日志（路由注册见下方 include_router）。
+register_exception_handlers(app)
+setup_logging()
 
 app.include_router(repositories.router, prefix="/api/repositories", tags=["repositories"])
 app.include_router(scans.router, prefix="/api/scans", tags=["scans"])

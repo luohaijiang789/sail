@@ -11,7 +11,7 @@ from app.domain import Base, TimestampMixin
 class ApiAsset(Base, TimestampMixin):
     __tablename__ = "api_asset"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     repository_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("repository.id"), nullable=False)
     source_revision_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("source_revision.id"), nullable=False)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
@@ -48,7 +48,7 @@ class ApiAsset(Base, TimestampMixin):
 class ApiCallEdge(Base, TimestampMixin):
     __tablename__ = "api_call_edge"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_asset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_asset.id"), nullable=False, index=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     depth: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -67,7 +67,7 @@ class ApiCallEdge(Base, TimestampMixin):
 class ApiResourceAccess(Base, TimestampMixin):
     __tablename__ = "api_resource_access"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_asset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_asset.id"), nullable=False, index=True)
     call_edge_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("api_call_edge.id"))
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
@@ -84,7 +84,7 @@ class ApiResourceAccess(Base, TimestampMixin):
 class ApiSecurityControl(Base, TimestampMixin):
     __tablename__ = "api_security_control"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer().with_variant(BigInteger, "mysql"), primary_key=True, autoincrement=True)
     api_asset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("api_asset.id"), nullable=False, index=True)
     scan_run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("scan_run.id"), nullable=False)
     control_type: Mapped[str] = mapped_column(String(30), nullable=False)  # AUTHN/AUTHZ/PARAM_VALIDATION/...
