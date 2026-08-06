@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +50,17 @@ def build_codeql_database(scan_run_id: int, stage_run_id: int, db: Session) -> d
 
     db_dir = Path(settings.workspace_root) / str(scan_run_id) / "codeql-db"
     db_path = str(db_dir)
+
+    # 预构建 SARIF 模式：CodeQL 在外部已 build+analyze，跳过 DB 构建（避免长编译被 kill）
+    if settings.prebuilt_sarif:
+        logger.info("build_skipped_prebuilt_sarif")
+        scan_run.build_quality = "EXTERNAL_CODEQL"
+        _set_stage(db, scan_run_id, "BUILD_CODEQL_DATABASE", STAGE_SUCCEEDED, metrics={
+            "build_quality": "EXTERNAL_CODEQL", "prebuilt": True,
+        })
+        db.commit()
+        return {"status": "SUCCEEDED", "output": {"build_quality": "EXTERNAL_CODEQL",
+                                                    "prebuilt": True}}
 
     # CodeQL 不可用 → NO_BUILD 降级（DEGRADE 语义，返回 SUCCEEDED）
     if not is_codeql_available():

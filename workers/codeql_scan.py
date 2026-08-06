@@ -8,6 +8,7 @@ source→sink 候选，统一写入 SARIF 文件供 FINDING_CANDIDATES 解析。
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +42,23 @@ def run_codeql_vuln_scan(scan_run_id: int, stage_run_id: int, db: Session) -> di
     results_dir = Path(settings.workspace_root) / str(scan_run_id) / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     sarif_path = results_dir / "vuln-scan.sarif"
+
+    # 0. 预构建 SARIF 模式：若配置 prebuilt_sarif，直接复用外部已跑好的 CodeQL SARIF。
+    #    用于 CodeQL 构建耗时长、需与流水线解耦执行的场景（DB 已在外部 build+analyze 完）。
+    prebuilt = settings.prebuilt_sarif
+    if prebuilt and Path(prebuilt).exists():
+        import shutil
+        shutil.copy2(prebuilt, sarif_path)
+        result_count = _count_sarif_results(sarif_path)
+        _set_stage(db, scan_run_id, "RUN_CODEQL_VULN_SCAN", STAGE_SUCCEEDED, metrics={
+            "scanner_id": "codeql", "sarif_path": str(sarif_path),
+            "result_count": result_count, "prebuilt": True,
+        })
+        db.commit()
+        logger.info("codeql_scan_prebuilt", results=str(sarif_path), count=result_count)
+        return {"status": "SUCCEEDED", "output": {
+            "scanner_id": "codeql", "sarif_path": str(sarif_path),
+            "result_count": result_count, "prebuilt": True}}
 
     # 判断是否可跑真 CodeQL：DB 已构建 + CLI 可用
     codeql_db_path = Path(settings.workspace_root) / str(scan_run_id) / "codeql-db"

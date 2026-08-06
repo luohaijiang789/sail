@@ -119,9 +119,10 @@ def merge_findings(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
 
 def _title(cand: FindingCandidate, rules: dict[int, str]) -> str:
     rule_key = rules.get(cand.rule_id, "vulnerability")
-    # symbol 形如 "path/to/File.java::methodName"，取方法名做标题
-    method = (cand.symbol or "").split("::")[-1] or cand.file_path
-    return f"{rule_key} in {method}"
+    # 用 file_path 的文件名 + 行号做标题，避免 symbol 在 CodeQL 形态下指向不一致文件
+    fname = cand.file_path.rsplit("/", 1)[-1] if cand.file_path else "unknown"
+    loc = f":{cand.start_line}" if cand.start_line else ""
+    return f"{rule_key} in {fname}{loc}"
 
 
 def _set_stage(db: Session, scan_run_id: int, stage_type: str, status: str, metrics: dict | None = None) -> None:

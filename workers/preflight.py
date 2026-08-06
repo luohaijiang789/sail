@@ -74,9 +74,11 @@ def _detect_build_plan(repo_root: Path) -> dict:
 
     # build_mode：有明确构建工具用 MANUAL_BUILD，否则 AUTOBUILD
     build_mode = "MANUAL_BUILD" if build_tool in ("maven", "gradle") else "AUTOBUILD"
+    # CodeQL 需观察编译过程：clean 强制重编译（否则 "Nothing to compile" 时 CodeQL 提取不到），
+    # fork 让 javac 独立进程运行（CodeQL 才能 trace）。D2：CodeQL 包裹编译，禁止重复编译。
     build_command = {
-        "maven": "mvn -q -DskipTests compile",
-        "gradle": "./gradlew compileJava",
+        "maven": "mvn clean compile -DskipTests -Dmaven.compiler.fork=true",
+        "gradle": "./gradlew clean compileJava",
         "unknown": "",
     }[build_tool]
 

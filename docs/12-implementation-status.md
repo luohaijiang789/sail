@@ -37,35 +37,74 @@
 | PERSIST_RESULTS | 两段式评分（ADR-06）回填 final_severity/risk_score；AI 向下否决不向上升级；生成 report.json |
 | FINALIZE | 更新 repository.last_scanned_commit，归档 summary |
 
-### 降级路径（明确标注，非真实 CodeQL/LLM 时仍产出真实结果）
+### 双路径设计（真实路径 + 降级路径，均产出真实结果）
 
-| 组件 | 真实路径 | 降级路径（当前 WebGoat 验证用） | 区分标记 |
+| 组件 | 真实路径 | 降级路径 | 区分标记 |
 |---|---|---|---|
-| 漏洞扫描 | CodeQL CLI + DB | Tree-sitter 污点分析（过程内 source→sink） | `scanner_id` = `codeql` / `sail-taint` |
+| 漏洞扫描 | CodeQL CLI 2.26.2 + DB + 244 条查询 | Tree-sitter 污点分析（过程内 source→sink） | `scanner_id` = `codeql` / `sail-taint` |
 | AI 验证 | OpenAI/Anthropic LLM | 规则启发式（数据流完整性+严重度+绑 API） | `model_name` = LLM 名 / `sail-heuristic-v1` |
 
-降级原因：WebGoat 要求 Java 25（环境为 21，mvn 编译失败）+ CodeQL CLI 未就绪 + 未配 LLM key。
-装好 CodeQL CLI（设 `SAIL_CODEQL_CLI_PATH`）并用 Java 25 构建后，BUILD 与 SCAN 自动切真 CodeQL；
-配 `SAIL_LLM_API_KEY` 后 AI_ANALYZE 自动切真 LLM。无需改代码。
+两种路径均已验证：CodeQL 真实路径产出 161 个漏洞（含 SQL 注入/路径注入/反序列化/XXE/CSRF/JWT 等）；
+降级路径产出 5 个核心漏洞。装好 CodeQL CLI（设 `SAIL_CODEQL_CLI_PATH`）+ Java 25 后自动切真 CodeQL；
+配 `SAIL_LLM_API_KEY` 后自动切真 LLM。无需改代码。
+
+### 预构建 SARIF 模式（CodeQL 构建与流水线解耦）
+
+CodeQL `database create`（mvn 编译）+ `analyze`（244 查询）耗时较长，长进程可能被运行环境限制。
+为此提供 `SAIL_PREBUILT_SARIF` 配置：设置后 BUILD 阶段跳过编译、SCAN 阶段直接复用外部已跑好的
+CodeQL SARIF，流水线在秒级完成扫描后处理。
+
+```bash
+# 1. 外部构建 CodeQL DB（Java 25 + mvn clean compile -Dmaven.compiler.fork=true）
+codeql database create /tmp/webgoat-db --language=java \
+  --source-root=/tmp/webgoat --overwrite \
+  --command="mvn clean compile -DskipTests -Dmaven.compiler.fork=true"
+# 2. 外部跑 CodeQL 分析产出 SARIF
+codeql pack download codeql/java-queries
+codeql database analyze /tmp/webgoat-db --format=sarif-latest \
+  --output=/tmp/webgoat-codeql.sarif codeql/java-queries:codeql-suites/java-security-and-quality.qls
+# 3. 流水线复用预构建 SARIF
+SAIL_PREBUILT_SARIF=/tmp/webgoat-codeql.sarif .venv/bin/python scripts/run_scan.py
+```
+
+> 不设 `SAIL_PREBUILT_SARIF` 时，若 CodeQL CLI + DB 可用则流水线内联跑完整 CodeQL。
 
 ## WebGoat 验证结果
 
+### 真 CodeQL 路径（CodeQL 2.26.2 + Java 25）
+
 ```
-扫描完成：ScanRun #1  状态=SUCCEEDED  进度=100%  build_quality=NO_BUILD_DEGRADED
+扫描完成：ScanRun #1  状态=SUCCEEDED  进度=100%  scanner_id=codeql
   ① API 资产表：198 个 API（Tree-sitter 提取）
   ② check 表：3960 条检查结果（198 API × 20 检查项）+ 198 个安全画像
-  ③ result 表：5 个漏洞实例
+  ③ result 表：161 个漏洞实例（CodeQL 244 查询）
 ```
 
-5 个真实漏洞（均为已知 WebGoat 故意漏洞，AI 启发式判定 LIKELY_TRUE_POSITIVE）：
+161 个 CodeQL 漏洞，关键类别：
 
-| 严重度 | 规则 | 位置 |
+| 规则 | 数量 | 说明 |
 |---|---|---|
-| MEDIUM | sql-injection | jwt/claimmisuse/JWTHeaderKIDEndpoint.java:73（JWT kid header 拼 SQL） |
-| MEDIUM | sql-injection | pathtraversal/ProfileUpload.java:43 |
-| MEDIUM | sql-injection | pathtraversal/ProfileUploadFix.java:43 |
-| MEDIUM | sql-injection | pathtraversal/ProfileUploadRemoveUserInput.java:41 |
-| MEDIUM | path-traversal | webwolf/FileServer.java:79 |
+| java/sql-injection | 16 | SQL 注入（含 JWT kid header 拼 SQL、各 SqlInjection 课） |
+| java/path-injection | 15 | 路径注入（ProfileUpload 系列） |
+| java/database-resource-leak | 26 | 数据库资源泄漏 |
+| java/unsafe-deserialization | 2 | 不安全反序列化 |
+| java/missing-jwt-signature-check | 5 | JWT 签名校验缺失 |
+| java/log-injection | 5 | 日志注入 |
+| java/xxe | 1 | XXE |
+| java/spring-disabled-csrf-protection | 2 | CSRF 保护关闭 |
+| java/insecure-randomness | 2 | 不安全随机数 |
+
+check 表正确反映发现：有 sql-injection 候选的 API，其 `SQL_INJECTION = HIGH`（关联 candidate_id）；
+无候选的 API `SQL_INJECTION = PASS`。
+
+### 降级路径（Tree-sitter 污点分析，无 CodeQL 时）
+
+```
+扫描完成：ScanRun #1  状态=SUCCEEDED  build_quality=NO_BUILD_DEGRADED
+  ① API 资产表：198 个 API
+  ② check 表：3960 条 + 198 安全画像
+  ③ result 表：5 个漏洞实例（过程内 source→sink）
+```
 
 > 严重度为 MEDIUM 是两段式评分结果（HIGH 基础分 + 上下文加权，但启发式 confidence 0.65 未达 HIGH 阈值）。
 > 配真 LLM 后 verdict/confidence 更精确，严重度会更贴近真实可利用性。

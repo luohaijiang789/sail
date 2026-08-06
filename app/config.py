@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # --- CodeQL ---
     codeql_cli_path: str = "codeql"
     workspace_root: str = "/tmp/sail-workspaces"
+    # 预构建 CodeQL SARIF 路径：设置后 BUILD 跳过编译、SCAN 直接复用外部跑好的 CodeQL 结果。
+    # 用于 CodeQL 构建耗时长需与流水线解耦执行的场景。留空则走正常 build+scan。
+    prebuilt_sarif: str = ""
 
     # --- LLM ---
     llm_provider: str = "openai"

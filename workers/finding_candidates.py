@@ -56,6 +56,12 @@ def finding_candidates(scan_run_id: int, stage_run_id: int, db: Session) -> dict
     except Exception:
         pass
 
+    # 规一化 rule_id：CodeQL 形如 "java/sql-injection"，统一去 "java/" 前缀成 "sql-injection"
+    # 便于与 check 表 RULE_TO_CHECK、Rule.rule_key 对齐
+    for cd in candidates_data:
+        if cd.rule_id and cd.rule_id.startswith("java/"):
+            cd.rule_id = cd.rule_id[len("java/"):]
+
     # 确保有默认 RulePack + Rule 记录
     rule_map = _ensure_rules(db, candidates_data)
 
@@ -75,11 +81,12 @@ def finding_candidates(scan_run_id: int, stage_run_id: int, db: Session) -> dict
         if same_file:
             api_asset_id = same_file[0].id
 
-        # 指纹：rule_id + 归一化 source/sink 符号 + method，不用行号（D6）
+        # 指纹：rule_id + file_path + 归一化 source/sink 符号，不用行号（D6）
+        # 含 file_path 避免不同文件的同类漏洞被过度归并
         fp_src = cd.source_location.get("symbol", "") if cd.source_location else ""
         fp_sink = cd.sink_location.get("symbol", "") if cd.sink_location else ""
         fingerprint = hashlib.sha256(
-            f"{cd.rule_id}:{cd.symbol}:{fp_src}:{fp_sink}".encode()
+            f"{cd.rule_id}:{cd.file_path}:{cd.symbol}:{fp_src}:{fp_sink}".encode()
         ).hexdigest()[:16]
 
         rule_id = rule_map.get(cd.rule_id)
