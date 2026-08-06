@@ -1,0 +1,30 @@
+# SAIL 基础镜像。
+# 所有容器（API/Workers）都基于此镜像。
+# 只装 Python + 项目依赖 + git/curl 等基础工具。
+# JDK/Maven/CodeQL 在角色镜像（Dockerfile.build/Dockerfile.codeql）中安装。
+
+FROM python:3.11-slim AS base
+
+# 基础工具：git（fetch worker 需要）、curl/unzip（下载用）、jq（JSON处理）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    unzip \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 先装依赖（利用 Docker 层缓存）
+COPY pyproject.toml alembic.ini ./
+RUN pip install --no-cache-dir -e ".[dev]"
+
+# 复制项目代码
+COPY app/ workers/ extractors/ scanners/ ai/ config/ migrations/ ./
+
+# 非 root 用户（安全隔离，架构文档 10-platform.md 要求）
+RUN useradd -m -g root sail && chown -R sail:root /app
+USER sail
+
+# 默认命令（被 docker-compose 的 command 覆盖）
+CMD ["python", "-c", "print('SAIL base image. Use docker-compose to start services.')"]

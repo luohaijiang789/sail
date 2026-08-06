@@ -1,32 +1,46 @@
-version: "3.8"
+# SAIL 平台 Docker Compose
+# 多镜像架构：base → build/codeql/general，共享 Volume（源码/Maven/CodeQL DB）
+# 对应架构文档 10-platform.md
 
 services:
-  # --- 基础设施 ---
+  # ============================================================
+  # 基础设施
+  # ============================================================
   mysql:
     image: mysql:8.0
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: sailroot
-      MYSQL_DATABASE: sail
-      MYSQL_USER: sail
-      MYSQL_PASSWORD: sail
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-sailroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sail}
+      MYSQL_USER: ${MYSQL_USER:-sail}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sail}
     ports:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks: [internal]
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     networks: [internal]
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: sail
-      MINIO_ROOT_PASSWORD: sail123456
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-sail}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-sail123456}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -34,82 +48,171 @@ services:
       - minio-data:/data
     networks: [internal]
 
-  # --- SAIL 服务 ---
-  sail-api:
-    build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-      SAIL_MINIO_ACCESS_KEY: sail
-      SAIL_MINIO_SECRET_KEY: sail123456
-    ports:
-      - "8000:8000"
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
-  sail-worker-fetch:
-    build: .
-    command: celery -A workers.celery_app worker -Q source_fetch -c 4 -n fetch@%h
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
-  sail-worker-build:
-    build: .
-    command: celery -A workers.celery_app worker -Q java_build_jdk17 -c 2 -n build@%h
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
-  sail-worker-codeql:
-    build: .
-    command: celery -A workers.celery_app worker -Q codeql_query -c 2 -n codeql@%h
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
-  sail-worker-ai:
-    build: .
-    command: celery -A workers.celery_app worker -Q ai_analysis -c 4 -n ai@%h
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
-  sail-worker-postprocess:
-    build: .
-    command: celery -A workers.celery_app worker -Q result_process,source_extract -c 4 -n post@%h
-    environment:
-      SAIL_MYSQL_URL: mysql+pymysql://sail:sail@mysql:3306/sail
-      SAIL_REDIS_URL: redis://redis:6379/0
-      SAIL_MINIO_ENDPOINT: minio:9000
-    depends_on: [mysql, redis, minio]
-    networks: [internal]
-
   flower:
     image: mher/flower:latest
+    restart: unless-stopped
     command: celery --broker=redis://redis:6379/0 flower --port=5555
     ports:
       - "5555:5555"
     depends_on: [redis]
     networks: [internal]
 
+  # ============================================================
+  # SAIL API（通用镜像）
+  # ============================================================
+  sail-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.general
+    image: sail-general:latest
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: &sail-env
+      SAIL_MYSQL_URL: mysql+pymysql://${MYSQL_USER:-sail}:${MYSQL_PASSWORD:-sail}@mysql:3306/${MYSQL_DATABASE:-sail}
+      SAIL_REDIS_URL: redis://redis:6379/0
+      SAIL_MINIO_ENDPOINT: minio:9000
+      SAIL_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-sail}
+      SAIL_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-sail123456}
+      SAIL_MINIO_BUCKET: sail
+      SAIL_WORKSPACE_ROOT: /workspaces
+      SAIL_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SAIL_LLM_API_KEY: ${LLM_API_KEY:-}
+      SAIL_LLM_BASE_URL: ${LLM_BASE_URL:-}
+      SAIL_LLM_MODEL_STRONG: ${LLM_MODEL_STRONG:-gpt-4o}
+      SAIL_LLM_MODEL_FAST: ${LLM_MODEL_FAST:-gpt-4o-mini}
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_started}
+      minio: {condition: service_started}
+    networks: [internal]
+    volumes:
+      - sail-workspaces:/workspaces
+
+  # ============================================================
+  # Fetch Worker（通用镜像）
+  # 拉取代码，需要 git + 网络访问
+  # ============================================================
+  sail-worker-fetch:
+    image: sail-general:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q source_fetch -c 4 -n fetch@%h --loglevel=info
+    environment: *sail-env
+    depends_on:
+      redis: {condition: service_started}
+    networks: [internal]
+    volumes:
+      - sail-workspaces:/workspaces
+
+  # ============================================================
+  # Build Worker（构建镜像：JDK17/21/25 + Maven + CodeQL）
+  # 编译 Java 仓库 + 创建 CodeQL 数据库
+  # 共享：workspaces（源码）、maven-repo（依赖缓存）、codeql-db（数据库）
+  # ============================================================
+  sail-worker-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+      args:
+        CODEQL_VERSION: ${CODEQL_VERSION:-2.22.4}
+    image: sail-build:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q java_build_jdk17 -c 2 -n build@%h --loglevel=info
+    environment:
+      <<: *sail-env
+      SAIL_CODEQL_CLI_PATH: /usr/local/bin/codeql
+      JAVA_HOME_17: /usr/lib/jvm/java-17-openjdk-amd64
+      JAVA_HOME_21: /usr/lib/jvm/java-21-openjdk-amd64
+      JAVA_HOME_25: /usr/lib/jvm/java-25-openjdk-amd64
+    depends_on:
+      redis: {condition: service_started}
+      minio: {condition: service_started}
+    networks: [internal]
+    volumes:
+      - sail-workspaces:/workspaces
+      - sail-maven-repo:/root/.m2
+      - sail-codeql-db:/codeql-db
+
+  # ============================================================
+  # CodeQL Worker（CodeQL 镜像）
+  # 运行漏洞规则扫描，需要 CodeQL CLI + CodeQL DB（只读）
+  # ============================================================
+  sail-worker-codeql:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.codeql
+      args:
+        CODEQL_VERSION: ${CODEQL_VERSION:-2.22.4}
+    image: sail-codeql:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q codeql_query -c 2 -n codeql@%h --loglevel=info
+    environment:
+      <<: *sail-env
+      SAIL_CODEQL_CLI_PATH: /usr/local/bin/codeql
+    depends_on:
+      redis: {condition: service_started}
+    networks: [internal]
+    volumes:
+      - sail-codeql-db:/codeql-db:ro
+      - sail-workspaces:/workspaces:ro
+
+  # ============================================================
+  # Extract Worker（通用镜像）
+  # Tree-sitter 提取 API 信息，需要读源码（只读）
+  # ============================================================
+  sail-worker-extract:
+    image: sail-general:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q source_extract -c 4 -n extract@%h --loglevel=info
+    environment: *sail-env
+    depends_on:
+      redis: {condition: service_started}
+    networks: [internal]
+    volumes:
+      - sail-workspaces:/workspaces:ro
+
+  # ============================================================
+  # AI Worker（通用镜像）
+  # 调 LLM API，轻量，不需要源码访问
+  # ============================================================
+  sail-worker-ai:
+    image: sail-general:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q ai_analysis -c 4 -n ai@%h --loglevel=info
+    environment: *sail-env
+    depends_on:
+      redis: {condition: service_started}
+    networks: [internal]
+
+  # ============================================================
+  # Postprocess Worker（通用镜像）
+  # 结果后处理 + 落库，需要 DB + MinIO 读
+  # ============================================================
+  sail-worker-postprocess:
+    image: sail-general:latest
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker -Q result_process,maintenance -c 4 -n post@%h --loglevel=info
+    environment: *sail-env
+    depends_on:
+      redis: {condition: service_started}
+      mysql: {condition: service_healthy}
+    networks: [internal]
+
+# ============================================================
+# Volumes
+# ============================================================
 volumes:
   mysql-data:
+  redis-data:
   minio-data:
+  sail-workspaces:      # 源码工作区，fetch 写入，build/extract/codeql 读
+  sail-maven-repo:      # Maven 依赖缓存，build 专用，避免重复下载
+  sail-codeql-db:       # CodeQL 数据库，build 创建，codeql 查询用
 
+# ============================================================
+# Networks
+# ============================================================
 networks:
   internal:
+    driver: bridge

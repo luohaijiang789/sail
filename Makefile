@@ -56,3 +56,18 @@ docker-down:
 
 docker-logs:
 	cd docker && docker-compose logs -f
+
+docker-build:
+	cd docker && docker-compose build
+
+docker-build-base:
+	docker build -f docker/Dockerfile.base -t sail-base:latest .
+
+docker-build-build:
+	docker build -f docker/Dockerfile.build -t sail-build:latest --build-arg CODEQL_VERSION=2.22.4 .
+
+docker-build-codeql:
+	docker build -f docker/Dockerfile.codeql -t sail-codeql:latest --build-arg CODEQL_VERSION=2.22.4 .
+
+docker-ps:
+	cd docker && docker-compose ps

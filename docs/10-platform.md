@@ -238,11 +238,61 @@ structlog 结构化日志，每条含 `scan_run_id/stage_run_id/task_id/reposito
 | AI | LLM密钥、Evidence读 | 源码访问、DB管理员 |
 | Postprocess | DB写、MinIO读 | Git凭证、AI密钥 |
 
-## Docker Compose
+## Docker 架构（多镜像 + 共享 Volume）
+
+### 镜像组织
 
 ```
-public-network:    nginx / frontend / api
+sail-base (Python 3.11 + 依赖 + git/curl)
+  ├─ sail-general  → 直接用 base（fetch/extract/ai/postprocess/api）
+  ├─ sail-build    → base + JDK17/21/25 + Maven + CodeQL（编译+建库）
+  └─ sail-codeql   → base + CodeQL（跑查询，不需要 JDK/Maven）
+```
+
+### Dockerfile 结构
+
+```
+docker/
+├─ Dockerfile.base       # 基础镜像（Python + 依赖 + git）
+├─ Dockerfile.build      # Build Worker（base + JDK17/21/25 + Maven + CodeQL）
+├─ Dockerfile.codeql     # CodeQL Worker（base + CodeQL）
+├─ Dockerfile.general    # 通用 Worker（直接用 base）
+├─ docker-compose.yml    # 全部服务编排
+├─ .env.docker           # 环境变量模板
+├─ entrypoint.sh         # Worker 启动脚本（按角色选队列）
+└─ switch-java.sh         # JDK 切换脚本（Python 按 BuildPlan 调用）
+```
+
+### 共享 Volume
+
+| Volume | 挂载点 | 共享于 | 用途 |
+|---|---|---|---|
+| sail-workspaces | /workspaces | fetch(写) → build/extract/codeql(读) | 源码工作区 |
+| sail-maven-repo | /root/.m2 | build 专用 | Maven 依赖缓存，避免重复下载 |
+| sail-codeql-db | /codeql-db | build(写) → codeql(读) | CodeQL 数据库 |
+| mysql-data | /var/lib/mysql | mysql | 业务数据持久化 |
+| redis-data | /data | redis | 队列/缓存持久化 |
+| minio-data | /data | minio | 源码快照/日志/报告 |
+
+### 多 JDK
+
+Build Worker 容器装 JDK 17/21/25，Python 按 BuildPlan 的 `jdk_version` 调用 `switch-java.sh` 切换 `JAVA_HOME`：
+
+```bash
+switch-java 25  # 切到 JDK 25（WebGoat 需要）
+```
+
+### CodeQL 版本参数化
+
+```bash
+# 构建时指定版本
+docker build -f docker/Dockerfile.build --build-arg CODEQL_VERSION=2.22.4 -t sail-build:latest .
+```
+
+### 网络隔离
+
+```
 internal-network:  api / workers / mysql / redis / minio
 ```
 
-MySQL/Redis/MinIO 不对公网开放。容器间用服务名访问。
+MySQL/Redis/MinIO 不对宿主机公网开放。容器间用服务名访问。

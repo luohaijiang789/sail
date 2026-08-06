@@ -1,0 +1,9 @@
+# SAIL 通用 Worker 镜像。
+# 直接用 base，不额外装工具。
+# 用于：fetch/extract/ai/postprocess 等 Python-only Worker。
+# 也用于 sail-api（API 服务）。
+
+FROM sail-base:latest AS general
+# 无额外安装，base 已含 Python + git + curl
+WORKDIR /app
+USER sail

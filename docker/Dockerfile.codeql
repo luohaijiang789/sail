@@ -1,0 +1,30 @@
+# SAIL CodeQL Worker 镜像。
+# 在 base 基础上加 CodeQL CLI（不需要 JDK/Maven）。
+# 负责：运行 CodeQL 漏洞规则扫描，输出 SARIF。
+# 对应架构文档 01-data-flow.md 的 RUN_CODEQL_VULN_SCAN 阶段。
+
+FROM sail-base:latest AS codeql
+
+ARG CODEQL_VERSION=2.22.4
+
+USER root
+
+# === CodeQL CLI ===
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64)  CODEQL_ARCH="linux64" ;; \
+        aarch64) CODEQL_ARCH="linux-arm64" ;; \
+        *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-${CODEQL_ARCH}.zip" \
+        -o /tmp/codeql.zip \
+    && unzip -q /tmp/codeql.zip -d /opt/codeql \
+    && rm /tmp/codeql.zip \
+    && ln -s /opt/codeql/codeql /usr/local/bin/codeql
+
+ENV CODEQL_CLI_PATH=/usr/local/bin/codeql
+
+# CodeQL 数据库目录（docker-compose 挂载 volume，与 build worker 共享）
+RUN mkdir -p /codeql-db
+
+USER sail

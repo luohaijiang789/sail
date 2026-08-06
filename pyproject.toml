@@ -26,6 +26,7 @@ dependencies = [
     "tree-sitter-java>=0.23",
     "pyyaml>=6.0",
     "sarif-tools>=1.0",
+    "structlog>=24.1",
 ]
 
 [project.optional-dependencies]

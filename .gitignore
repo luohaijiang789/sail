@@ -36,3 +36,8 @@ htmlcov/
 
 # Docker
 docker/data/
+docker/.env
+
+# 工具二进制（不进 git）
+.tools/
+.env.tools

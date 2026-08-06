@@ -1,0 +1,64 @@
+# SAIL Build Worker 镜像。
+# 在 base 基础上加 JDK 17/21/25 + Maven + CodeQL CLI。
+# 负责：编译 Java 仓库 + 创建 CodeQL 数据库。
+# 对应架构文档 02-build.md 的 BUILD_CODEQL_DATABASE 阶段。
+
+FROM sail-base:latest AS build
+
+ARG CODEQL_VERSION=2.22.4
+ARG MAVEN_VERSION=3.9.9
+
+USER root
+
+# === JDK 17 + 21 + 25 ===
+# 一个容器装多个 JDK，Python 按 BuildPlan 切换 JAVA_HOME。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-17-jdk-headless \
+    openjdk-21-jdk-headless \
+    openjdk-25-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# JDK 路径（Debian/Ubuntu 约定）
+ENV JAVA_HOME_17=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME_21=/usr/lib/jvm/java-21-openjdk-amd64
+ENV JAVA_HOME_25=/usr/lib/jvm/java-25-openjdk-amd64
+# 默认用 JDK 21
+ENV JAVA_HOME=$JAVA_HOME_21
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# === Maven ===
+RUN curl -fsSL "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+    | tar xzf - -C /opt \
+    && ln -s /opt/apache-maven-${MAVEN_VERSION}/bin/mvn /usr/local/bin/mvn
+
+# Maven 依赖缓存目录（docker-compose 挂载 volume 共享）
+ENV MAVEN_CONFIG=/root/.m2
+RUN mkdir -p /root/.m2
+
+# === CodeQL CLI ===
+# 版本通过 ARG 参数化，构建时 --build-arg CODEQL_VERSION=xxx 可改
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64)  CODEQL_ARCH="linux64" ;; \
+        aarch64) CODEQL_ARCH="linux-arm64" ;; \
+        *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-${CODEQL_ARCH}.zip" \
+        -o /tmp/codeql.zip \
+    && unzip -q /tmp/codeql.zip -d /opt/codeql \
+    && rm /tmp/codeql.zip \
+    && ln -s /opt/codeql/codeql /usr/local/bin/codeql
+
+ENV CODEQL_CLI_PATH=/usr/local/bin/codeql
+
+# === JDK 切换脚本 ===
+# Python Worker 调用此脚本切换 JAVA_HOME
+COPY docker/switch-java.sh /usr/local/bin/switch-java
+RUN chmod +x /usr/local/bin/switch-java
+
+# === 工作目录 ===
+# 源码工作区（docker-compose 挂载 volume）
+RUN mkdir -p /workspaces /codeql-db
+ENV WORKSPACE_ROOT=/workspaces
+
+USER sail
