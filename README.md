@@ -55,18 +55,26 @@ D1 固定commit / D2 CodeQL包裹编译 / D3 围绕ScanRun / D4 AI只判断 / D5
 ## 代码目录
 
 ```
-app/             # FastAPI + Orchestrator
-workers/         # 各 Worker
-extractors/      # Tree-sitter 提取
-scanners/        # CodeQL
-ai/              # AI 分析
-migrations/      # DB 迁移
-tests/           # 测试
+app/                # FastAPI 应用
+  ├─ core/          # 日志/异常/常量/结果包装
+  ├─ domain/        # ORM 模型（20+ 张表）
+  ├─ api/           # REST router + Pydantic DTO + 依赖注入 + 异常处理
+  ├─ application/   # 编排逻辑（状态机/重试/创建扫描）
+  └─ infrastructure/# 基础设施适配器（Protocol 接口可替换）
+workers/            # Celery + 13 个阶段 Worker + BaseStageWorker 基类
+extractors/         # Tree-sitter 提取层 + ExtractionPipeline
+scanners/           # CodeQL 扫描器 + 可插拔后处理器 + 注册表
+ai/                 # AI 分析 + LLM providers 抽象层（OpenAI/Anthropic 可切换）
+config/             # 外置配置（检查项 YAML）
+frontend/           # Vue 3 前端（vue-vben-admin + Element Plus）
+docker/             # Dockerfile + docker-compose
+migrations/         # Alembic 迁移
+tests/              # 测试
 ```
 
 ## 技术栈
 
-FastAPI · Celery · MySQL · Redis · MinIO · Vue · CodeQL CLI · Tree-sitter
+FastAPI · Celery · MySQL · Redis · MinIO · CodeQL CLI · Tree-sitter · Vue 3 · Element Plus · structlog
 
 ## 当前状态
 

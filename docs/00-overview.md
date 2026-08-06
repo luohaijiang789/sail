@@ -65,22 +65,42 @@ flowchart TB
 | 业务库 | MySQL |
 | 队列/缓存 | Redis |
 | 对象存储 | MinIO |
-| 前端 | Vue |
+| 前端 | Vue 3 + vue-vben-admin v5 + Element Plus |
 | CodeQL | CodeQL CLI（只扫漏洞，不提取 API 信息） |
 | API 提取 | Tree-sitter + 框架 Adapter（轻量） |
+| LLM | OpenAI / Anthropic（通过 providers 抽象层可切换） |
+| 日志 | structlog 结构化日志 |
+
+## 分层解耦架构
+
+```
+API 层        router → schemas(DTO) → deps → errors     不直接操作 ORM
+Application   create_scan / orchestrate_scan             编排逻辑
+Domain        ORM 模型 + 阶段常量 + DAG 依赖
+Infrastructure interfaces(Protocol) → 具体实现            可替换
+Core          logging / exceptions / constants / result  被所有层依赖
+Workers       base(BaseStageWorker) → 13个阶段Worker
+Extractors    pipeline → java/frameworks/api/config     只依赖 Tree-sitter
+Scanners      registry → codeql_runner → postprocessors 可插拔
+AI            schemas/prompts/evidence → providers       LLM 可切换
+```
 
 ## 部署形态
 
-第一阶段 Docker Compose，模块化单体代码库 + 多 Worker 容器。不微服务化。
+第一阶段 Docker Compose，模块化单体代码库 + 多 Worker 容器 + Vue 前端。不微服务化。
 
 ```
-sail-backend/         # 一个代码库
-  ├─ app/             # FastAPI + Orchestrator
-  ├─ workers/         # 各 Worker
-  ├─ extractors/      # Tree-sitter 提取
-  ├─ scanners/        # CodeQL
-  ├─ ai/              # AI 分析
-  └─ pyproject.toml
+sail/                # 一个代码库
+├─ app/              # FastAPI + Core + Domain + API + Application + Infrastructure
+├─ workers/          # Celery + 13 个阶段 Worker
+├─ extractors/       # Tree-sitter 提取层
+├─ scanners/         # CodeQL 扫描器 + 后处理器
+├─ ai/               # AI 分析 + LLM providers
+├─ config/           # 外置配置（检查项 YAML）
+├─ frontend/         # Vue 3 前端（vue-vben-admin）
+├─ docker/           # Dockerfile + docker-compose
+├─ migrations/       # Alembic 迁移
+└─ tests/            # 测试
 ```
 
 ## 不做的事（第一阶段）

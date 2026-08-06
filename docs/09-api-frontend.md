@@ -2,6 +2,23 @@
 
 > [← 08-orchestration](08-orchestration.md)　|　下一章：[10-platform](10-platform.md)
 
+## 前端技术栈
+
+基于 vue-vben-admin v5 monorepo 改造，使用 Element Plus 版（apps/web-ele）。
+
+| 组件 | 选型 |
+|---|---|
+| 框架 | Vue 3 + TypeScript |
+| 构建 | Vite |
+| UI | Element Plus |
+| 状态 | Pinia |
+| 路由 | Vue Router 4 |
+| HTTP | Axios |
+| 图表 | ECharts（安全分趋势/调用链可视化） |
+| 框架能力 | vben 的布局/权限/国际化/动态路由 |
+
+前端目录：`frontend/apps/web-ele/src/`，页面在 `views/`，API 封装在 `api/sail/`，路由在 `router/routes/modules/sail.ts`。
+
 ## REST API
 
 ```

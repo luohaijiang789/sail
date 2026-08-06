@@ -1,0 +1,227 @@
+# SAIL 预定义检查项配置
+# 对应架构文档 04-check-and-security.md 的预定义必查清单
+# 平台管理员可在此扩展自定义检查项
+
+version: 1
+
+check_items:
+  # === 注入类（CodeQL 判定）===
+  - key: SQL_INJECTION
+    name: SQL 注入
+    category: INJECTION
+    source: CODEQL
+    codeql_rule: java/sql-injection
+    requires_dataflow: true
+    cwe: CWE-89
+
+  - key: COMMAND_INJECTION
+    name: 命令注入
+    category: INJECTION
+    source: CODEQL
+    codeql_rule: java/command-line-injection
+    requires_dataflow: true
+    cwe: CWE-78
+
+  - key: XPATH_INJECTION
+    name: XPath 注入
+    category: INJECTION
+    source: CODEQL
+    codeql_rule: java/xpath-injection
+    requires_dataflow: true
+    cwe: CWE-643
+
+  - key: LDAP_INJECTION
+    name: LDAP 注入
+    category: INJECTION
+    source: CODEQL
+    requires_dataflow: true
+    cwe: CWE-90
+
+  # === 客户端类（CodeQL 判定）===
+  - key: XSS
+    name: XSS
+    category: CLIENT
+    source: CODEQL
+    codeql_rule: java/xss
+    requires_dataflow: true
+    cwe: CWE-79
+
+  - key: OPEN_REDIRECT
+    name: 开放重定向
+    category: CLIENT
+    source: CODEQL
+    codeql_rule: java/uncontrolled-redirect
+    requires_dataflow: true
+    cwe: CWE-601
+
+  # === 服务端类（CodeQL 判定）===
+  - key: DESERIALIZATION
+    name: 反序列化
+    category: SERVER
+    source: CODEQL
+    codeql_rule: java/unsafe-deserialization
+    requires_dataflow: true
+    cwe: CWE-502
+
+  - key: SSRF
+    name: SSRF
+    category: SERVER
+    source: CODEQL
+    codeql_rule: java/ssrf
+    requires_dataflow: true
+    cwe: CWE-918
+
+  - key: PATH_TRAVERSAL
+    name: 路径遍历
+    category: SERVER
+    source: CODEQL
+    codeql_rule: java/path-injection
+    requires_dataflow: true
+    cwe: CWE-22
+
+  # === 访问控制类（API 资产判定）===
+  - key: NO_AUTHN
+    name: 鉴权缺失
+    category: ACCESS_CONTROL
+    source: API_ASSET
+    description: API 无 AUTHN 安全控制
+    risk_score: 30
+
+  - key: NO_AUTHZ
+    name: 授权不足
+    category: ACCESS_CONTROL
+    source: API_ASSET
+    description: 无 AUTHZ 或权限过宽
+    risk_score: 25
+
+  - key: NO_PARAM_VALIDATION
+    name: 参数校验缺失
+    category: ACCESS_CONTROL
+    source: API_ASSET
+    description: 入参无 @Valid 等校验
+    risk_score: 15
+
+  - key: NO_CSRF
+    name: CSRF 缺失
+    category: ACCESS_CONTROL
+    source: API_ASSET
+    description: 写接口无 CSRF 保护
+    risk_score: 10
+    applies_to_methods: [POST, PUT, DELETE, PATCH]
+
+  - key: NO_RATE_LIMIT
+    name: 限流缺失
+    category: ACCESS_CONTROL
+    source: API_ASSET
+    description: 无限流控制
+    risk_score: 5
+
+  # === 数据保护类（API 资产判定）===
+  - key: SENSITIVE_DATA_RETURN
+    name: 敏感数据返回
+    category: DATA_PROTECTION
+    source: API_ASSET
+    description: 返回值含密码/token/身份证
+    risk_score: 25
+    sensitive_field_patterns:
+      - password
+      - token
+      - secret
+      - id_card
+      - credit_card
+
+  - key: SENSITIVE_DATA_ACCESS
+    name: 敏感数据访问
+    category: DATA_PROTECTION
+    source: API_ASSET
+    description: 访问用户隐私表
+    risk_score: 20
+    sensitive_table_patterns:
+      - t_user
+      - user_profile
+      - t_password
+      - t_credential
+      - t_payment
+      - t_order
+
+  # === 代码质量类（CodeQL 判定）===
+  - key: HARDCODED_CREDENTIALS
+    name: 硬编码凭证
+    category: CODE_QUALITY
+    source: CODEQL
+    codeql_rule: java/hardcoded-credentials
+    requires_dataflow: false
+    risk_score: 25
+
+  - key: WEAK_CRYPTO
+    name: 弱加密
+    category: CODE_QUALITY
+    source: CODEQL
+    codeql_rule: java/weak-cryptographic-algorithm
+    requires_dataflow: false
+    risk_score: 20
+
+  - key: EMPTY_CATCH
+    name: 空 catch
+    category: CODE_QUALITY
+    source: CODEQL
+    requires_dataflow: false
+    risk_score: 15
+
+  - key: INSECURE_RANDOM
+    name: 不安全随机数
+    category: CODE_QUALITY
+    source: CODEQL
+    codeql_rule: java/insecure-random
+    requires_dataflow: false
+    risk_score: 10
+
+# === 四维度权重 ===
+dimension_weights:
+  exposure: 0.30
+  callchain: 0.35
+  data_sensitivity: 0.20
+  codequality: 0.15
+
+# === 维度 → 检查项映射 ===
+dimension_check_items:
+  exposure:
+    - NO_AUTHN
+    - NO_AUTHZ
+    - NO_PARAM_VALIDATION
+    - NO_CSRF
+    - NO_RATE_LIMIT
+  callchain:
+    - SQL_INJECTION
+    - COMMAND_INJECTION
+    - DESERIALIZATION
+    - SSRF
+    - PATH_TRAVERSAL
+    - XPATH_INJECTION
+    - LDAP_INJECTION
+    - OPEN_REDIRECT
+  data_sensitivity:
+    - SENSITIVE_DATA_RETURN
+    - SENSITIVE_DATA_ACCESS
+  codequality:
+    - HARDCODED_CREDENTIALS
+    - WEAK_CRYPTO
+    - EMPTY_CATCH
+    - INSECURE_RANDOM
+
+# === 结果 → 分值映射 ===
+result_score_map:
+  CRITICAL: 100
+  HIGH: 80
+  MEDIUM: 60
+  LOW: 40
+  PASS: 0
+  NOT_CHECKED: 0
+
+# === 安全等级范围 ===
+score_ranges:
+  SAFE: [0, 24]
+  LOW_RISK: [25, 49]
+  MEDIUM_RISK: [50, 69]
+  HIGH_RISK: [70, 84]
+  CRITICAL: [85, 100]
