@@ -137,6 +137,7 @@ def main() -> None:
             db=db, repository_id=repo_id,
             revision={"type": "branch", "value": args.branch},
             scan_profile_id=None, ai_analysis=True,
+            dispatch=False,  # 脚本自行调 run_scan_synchronous，避免线程并发（SQLite 锁）
         )
         scan_run_id = scan_run.id
         print(f"扫描已创建：ScanRun #{scan_run_id}，开始执行 DAG...")

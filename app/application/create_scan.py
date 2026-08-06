@@ -30,6 +30,7 @@ def create_scan(
     revision: str,
     scan_profile_id: int | None,
     ai_analysis: bool,
+    dispatch: bool = True,
 ) -> ScanRun:
     """创建一次扫描并派发首个阶段任务。
 
@@ -38,6 +39,8 @@ def create_scan(
         repository_id: 仓库 ID。
         revision: 版本引用值（分支名 / Tag 名 / commit SHA），由调用方从 RevisionRef 解析。
         scan_profile_id: 扫描配置 ID，可为空走默认。
+        dispatch: 是否派发执行。脚本同步形态传 ``False`` 后自行调用
+            ``run_scan_synchronous``，避免与线程派发并发跑同一扫描（SQLite 锁）。
         ai_analysis: 是否开启 AI 分析阶段（影响可选阶段是否实际执行，此处仅记录语义，
             阶段创建仍按 STAGE_DEFINITIONS 全量创建，由编排器按 on_failure 决定降级）。
 
@@ -104,9 +107,9 @@ def create_scan(
         ai_analysis=ai_analysis,
     )
 
-    # 5. 提交首个 Celery 任务 start_scan(scan_run_id)。
-    # 后台 Celery 不一定连上 Redis，先 print 模拟派发，并置 QUEUED。
-    _dispatch_start_scan(scan_run.id)
+    # 5. 派发执行（脚本同步形态传 dispatch=False 自行驱动，避免并发跑同一扫描）。
+    if dispatch:
+        _dispatch_start_scan(scan_run.id)
 
     scan_run.status = SCAN_RUN_QUEUED
     db.commit()
