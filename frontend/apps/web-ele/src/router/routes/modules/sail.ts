@@ -12,6 +12,16 @@ const routes: RouteRecordRaw[] = [
     component: () => import('#/views/repositories/list.vue'),
   },
   {
+    name: 'RepositoryDetail',
+    path: '/repositories/:id',
+    component: () => import('#/views/repositories/detail.vue'),
+    meta: {
+      title: '仓库详情',
+      hideInMenu: true,
+      activePath: '/repositories',
+    },
+  },
+  {
     meta: {
       icon: 'mdi:radar',
       order: 200,
