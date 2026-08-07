@@ -6,20 +6,19 @@ import type {
   PageResult,
   ResourceAccess,
   SecurityControl,
-  SecurityProfile,
 } from '#/types/sail';
 
 import { requestClient } from '#/api/request';
 
 export namespace ApiAssetsApi {
   export type Query = PageQuery & {
-    repositoryId?: number;
-    scanRunId?: number;
-    httpMethod?: string;
+    repository_id?: number;
+    scan_run_id?: number;
+    http_method?: string;
     status?: ApiAsset['status'];
-    securityLevel?: string;
-    minSecurityScore?: number;
-    hasFindings?: boolean;
+    security_level?: string;
+    min_security_score?: number;
+    has_findings?: boolean;
   };
 
   export type VersionHistoryItem = {
@@ -108,10 +107,12 @@ export async function getApiAssetHistoryApi(assetId: number) {
 }
 
 /**
- * 安全画像（详情页汇总用）
+ * 安全画像 + 安全控制（详情页汇总用）
+ *
+ * 后端 `GET /api-assets/{id}/security` 一次返回 `{profile, controls}`。
  */
-export async function getSecurityProfileApi(assetId: number) {
-  return requestClient.get<SecurityProfile>(
-    `/api-assets/${assetId}/security-profile`,
+export async function getApiAssetSecurityApi(assetId: number) {
+  return requestClient.get<{ profile: any | null; controls: any[] }>(
+    `/api-assets/${assetId}/security`,
   );
 }

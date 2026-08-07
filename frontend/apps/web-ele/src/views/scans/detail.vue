@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -7,131 +7,27 @@ import { Page } from '@vben/common-ui';
 import {
   ElButton,
   ElCard,
-  ElCol,
   ElDescriptions,
   ElDescriptionsItem,
   ElEmpty,
-  ElInput,
-  ElScrollbar,
+  ElMessage,
+  ElProgress,
+  ElTable,
+  ElTableColumn,
   ElTag,
-  ElTimeline,
-  ElTimelineItem,
 } from 'element-plus';
 
-import type { ScanLogLine, ScanRun, ScanStageRun } from '#/types/sail';
+import { cancelScanApi, getScanApi, retryScanApi } from '#/api/sail/scans';
 
 defineOptions({ name: 'ScanDetail' });
 
 const route = useRoute();
-const scanId = computed(() => Number(route.params.id));
+const scanId = Number(route.params.id);
 
-// mock 扫描详情
-const scan = ref<ScanRun>({
-  id: scanId.value,
-  repositoryId: 1,
-  repositoryName: 'user-center',
-  sourceRevisionId: 10,
-  scanProfileId: 1,
-  status: 'RUNNING',
-  aiAnalysis: true,
-  startedAt: '2026-08-06 10:23:00',
-  finishedAt: null,
-  highRiskCount: 2,
-  apiAssetCount: 124,
-  findingCount: 18,
-  triggeredBy: 'admin',
-  errorMessage: null,
-});
-
-// mock 阶段时间线（08-orchestration.md 阶段依赖）
-const stages = ref<ScanStageRun[]>([
-  {
-    id: 1,
-    scanRunId: scanId.value,
-    stageType: 'FETCH_SOURCE',
-    status: 'SUCCEEDED',
-    attempt: 1,
-    maxAttempts: 3,
-    required: true,
-    onFailure: 'ABORT',
-    celeryTaskId: 'c1',
-    inputFingerprint: null,
-    outputArtifactId: 100,
-    startedAt: '2026-08-06 10:23:05',
-    finishedAt: '2026-08-06 10:23:42',
-    heartbeatAt: '2026-08-06 10:23:42',
-    retryable: false,
-    errorCode: null,
-    errorMessage: null,
-  },
-  {
-    id: 2,
-    scanRunId: scanId.value,
-    stageType: 'PREFLIGHT',
-    status: 'SUCCEEDED',
-    attempt: 1,
-    maxAttempts: 3,
-    required: true,
-    onFailure: 'ABORT',
-    celeryTaskId: 'c2',
-    inputFingerprint: null,
-    outputArtifactId: 101,
-    startedAt: '2026-08-06 10:23:45',
-    finishedAt: '2026-08-06 10:24:10',
-    heartbeatAt: '2026-08-06 10:24:10',
-    retryable: false,
-    errorCode: null,
-    errorMessage: null,
-  },
-  {
-    id: 3,
-    scanRunId: scanId.value,
-    stageType: 'BUILD_CODEQL_DATABASE',
-    status: 'RUNNING',
-    attempt: 1,
-    maxAttempts: 3,
-    required: true,
-    onFailure: 'DEGRADE',
-    celeryTaskId: 'c3',
-    inputFingerprint: null,
-    outputArtifactId: null,
-    startedAt: '2026-08-06 10:24:12',
-    finishedAt: null,
-    heartbeatAt: '2026-08-06 10:30:00',
-    retryable: true,
-    errorCode: null,
-    errorMessage: null,
-  },
-  {
-    id: 4,
-    scanRunId: scanId.value,
-    stageType: 'EXTRACT_API_FACTS',
-    status: 'PENDING',
-    attempt: 0,
-    maxAttempts: 3,
-    required: true,
-    onFailure: 'ABORT',
-    celeryTaskId: null,
-    inputFingerprint: null,
-    outputArtifactId: null,
-    startedAt: null,
-    finishedAt: null,
-    heartbeatAt: null,
-    retryable: false,
-    errorCode: null,
-    errorMessage: null,
-  },
-]);
-
-// mock 日志
-const logs = ref<ScanLogLine[]>([
-  { seq: 1, timestamp: '10:23:05', level: 'INFO', stage: 'FETCH_SOURCE', message: '开始拉取源码 a1b2c3d' },
-  { seq: 2, timestamp: '10:23:42', level: 'INFO', stage: 'FETCH_SOURCE', message: '源码归档完成 source_artifact_id=100' },
-  { seq: 3, timestamp: '10:23:45', level: 'INFO', stage: 'PREFLIGHT', message: '预检：识别构建方案 maven' },
-  { seq: 4, timestamp: '10:24:10', level: 'INFO', stage: 'PREFLIGHT', message: 'BuildPlan 生成完成' },
-  { seq: 5, timestamp: '10:24:12', level: 'INFO', stage: 'BUILD_CODEQL_DATABASE', message: '开始 CodeQL 建库' },
-  { seq: 6, timestamp: '10:28:00', level: 'WARN', stage: 'BUILD_CODEQL_DATABASE', message: '内存使用 9.2GB / 12GB' },
-]);
+// any: 后端 snake_case，避免类型摩擦
+const scan = ref<any>(null);
+const stages = ref<any[]>([]);
+const loading = ref(false);
 
 type TagType = 'danger' | 'info' | 'primary' | 'success' | 'warning';
 
@@ -156,199 +52,180 @@ const stageStatusTagType: Record<string, TagType> = {
   TIMEOUT: 'danger',
 };
 
-const logFilter = ref('');
-
-const filteredLogs = computed(() =>
-  logs.value.filter(
-    (l) =>
-      !logFilter.value ||
-      l.message.includes(logFilter.value) ||
-      l.stage?.includes(logFilter.value),
-  ),
+const isRunning = computed(() => scan.value?.status === 'RUNNING');
+const canRetry = computed(
+  () =>
+    scan.value?.status === 'FAILED' || scan.value?.status === 'CANCELLED',
 );
 
-const isRunning = computed(() => scan.value.status === 'RUNNING');
-
-function cancelScan() {
-  // TODO: cancelScanApi(scanId)
+function formatTime(t: null | string): string {
+  return t ? t.replace('T', ' ').slice(0, 19) : '-';
 }
 
-function retryScan() {
-  // TODO: retryScanApi(scanId)
+function metricsSummary(m: any): string {
+  if (!m || typeof m !== 'object') return '-';
+  const entries = Object.entries(m).slice(0, 4);
+  if (entries.length === 0) return '-';
+  return entries.map(([k, v]) => `${k}=${v}`).join(' · ');
 }
 
-function retryStage(stage: ScanStageRun) {
-  // TODO: retryStageApi(scanId, stage.id)
-  void stage;
+async function loadDetail() {
+  loading.value = true;
+  try {
+    const res: any = await getScanApi(scanId);
+    scan.value = res.scan;
+    stages.value = res.stages ?? [];
+  } catch {
+    // 错误提示由 request 拦截器统一处理
+  } finally {
+    loading.value = false;
+  }
 }
+
+async function cancelScan() {
+  try {
+    await cancelScanApi(scanId);
+    ElMessage.success('已请求取消扫描');
+    await loadDetail();
+  } catch {
+    // 拦截器处理
+  }
+}
+
+async function retryScan() {
+  try {
+    await retryScanApi(scanId);
+    ElMessage.success('已请求重试扫描');
+    await loadDetail();
+  } catch {
+    // 后端可能未实现，拦截器处理错误提示
+  }
+}
+
+onMounted(loadDetail);
 </script>
 
 <template>
   <Page description="扫描执行详情" :title="`扫描 #${scanId}`">
-    <div class="p-4">
-      <!-- 基本信息 -->
+    <div class="p-4" v-loading="loading">
+      <!-- 顶部：扫描状态卡片 -->
       <ElCard shadow="never" class="mb-4">
         <template #header>
           <div class="flex items-center justify-between">
-            <span>基本信息</span>
-            <div>
-              <ElTag :type="statusTagType[scan.status]" class="mr-2">
-                {{ scan.status }}
-              </ElTag>
-              <ElButton
-                v-if="isRunning"
-                type="danger"
-                size="small"
-                @click="cancelScan"
-              >
-                取消扫描
-              </ElButton>
-              <ElButton
-                v-if="scan.status === 'FAILED' || scan.status === 'CANCELLED'"
-                type="primary"
-                size="small"
-                @click="retryScan"
-              >
-                重试扫描
-              </ElButton>
-            </div>
+            <span>扫描状态</span>
+            <ElTag v-if="scan" :type="statusTagType[scan.status] ?? 'info'">
+              {{ scan.status }}
+            </ElTag>
           </div>
         </template>
-        <ElDescriptions :column="3" border>
-          <ElDescriptionsItem label="仓库">
-            {{ scan.repositoryName }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="扫描方案">
-            profile #{{ scan.scanProfileId }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="AI 分析">
-            <ElTag :type="scan.aiAnalysis ? 'success' : 'info'">
-              {{ scan.aiAnalysis ? '已开启' : '未开启' }}
-            </ElTag>
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="开始时间">
-            {{ scan.startedAt }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="结束时间">
-            {{ scan.finishedAt || '-' }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="触发人">
-            {{ scan.triggeredBy }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="API 数">
-            {{ scan.apiAssetCount }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="漏洞数">
-            {{ scan.findingCount }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="高危数">
-            <span :class="scan.highRiskCount ? 'text-red-500' : ''">
-              {{ scan.highRiskCount }}
-            </span>
-          </ElDescriptionsItem>
-        </ElDescriptions>
+        <template v-if="scan">
+          <ElDescriptions :column="3" border>
+            <ElDescriptionsItem label="当前阶段">
+              {{ scan.current_stage || '-' }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="执行模式">
+              {{ scan.mode }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="构建质量">
+              {{ scan.build_quality || '-' }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="开始时间">
+              {{ formatTime(scan.started_at) }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="结束时间">
+              {{ formatTime(scan.finished_at) }}
+            </ElDescriptionsItem>
+            <ElDescriptionsItem label="扫描 ID">
+              {{ scan.id }}
+            </ElDescriptionsItem>
+          </ElDescriptions>
+          <div class="mt-4">
+            <div class="mb-1 text-sm text-gray-500">进度</div>
+            <ElProgress :percentage="scan.progress ?? 0" />
+          </div>
+        </template>
+        <ElEmpty v-else description="暂无扫描数据" />
       </ElCard>
 
-      <ElCol :span="24">
-        <div class="md:flex">
-          <!-- 阶段时间线 -->
-          <ElCard shadow="never" class="mb-4 md:mr-4 md:w-1/2">
-            <template #header>阶段时间线</template>
-            <ElTimeline v-if="stages.length > 0">
-              <ElTimelineItem
-                v-for="stage in stages"
-                :key="stage.id"
-                :timestamp="stage.startedAt || '待执行'"
-                :type="
-                  stageStatusTagType[stage.status] === 'success'
-                    ? 'success'
-                    : stageStatusTagType[stage.status] === 'danger'
-                      ? 'danger'
-                      : stageStatusTagType[stage.status] === 'warning'
-                        ? 'warning'
-                        : 'primary'
-                "
+      <!-- 中部：阶段时间线 -->
+      <ElCard shadow="never" class="mb-4">
+        <template #header>阶段时间线</template>
+        <ElTable :data="stages" stripe size="small">
+          <ElTableColumn prop="stage_type" label="阶段" min-width="180" />
+          <ElTableColumn label="状态" width="120">
+            <template #default="{ row }">
+              <ElTag
+                size="small"
+                :type="stageStatusTagType[row.status] ?? 'info'"
               >
-                <div class="flex items-center justify-between">
-                  <span class="font-medium">{{ stage.stageType }}</span>
-                  <ElTag
-                    size="small"
-                    :type="stageStatusTagType[stage.status]"
-                  >
-                    {{ stage.status }}
-                  </ElTag>
-                </div>
-                <div class="mt-1 text-xs text-gray-500">
-                  第 {{ stage.attempt }}/{{ stage.maxAttempts }} 次 ·
-                  {{ stage.required ? '必需' : '可选' }} ·
-                  on_failure={{ stage.onFailure }}
-                </div>
-                <div v-if="stage.errorMessage" class="mt-1 text-xs text-red-500">
-                  {{ stage.errorMessage }}
-                </div>
-                <div v-if="stage.status === 'FAILED_RETRYABLE'" class="mt-2">
-                  <ElButton
-                    size="small"
-                    type="primary"
-                    @click="retryStage(stage)"
-                  >
-                    重试阶段
-                  </ElButton>
-                </div>
-              </ElTimelineItem>
-            </ElTimeline>
-            <ElEmpty v-else description="暂无阶段数据" />
-          </ElCard>
-
-          <!-- 实时日志 -->
-          <ElCard shadow="never" class="mb-4 md:w-1/2">
-            <template #header>
-              <div class="flex items-center justify-between">
-                <span>实时日志</span>
-                <ElInput
-                  v-model="logFilter"
-                  size="small"
-                  placeholder="过滤日志"
-                  style="width: 200px"
-                  clearable
-                />
-              </div>
+                {{ row.status }}
+              </ElTag>
             </template>
-            <ElScrollbar height="420px">
-              <div class="font-mono text-xs leading-6">
-                <div
-                  v-for="line in filteredLogs"
-                  :key="line.seq"
-                  class="whitespace-pre-wrap border-b border-gray-100 py-1"
-                >
-                  <span class="text-gray-400">{{ line.timestamp }}</span>
-                  <ElTag
-                    size="small"
-                    class="mx-2"
-                    :type="
-                      line.level === 'ERROR'
-                        ? 'danger'
-                        : line.level === 'WARN'
-                          ? 'warning'
-                          : 'info'
-                    "
-                  >
-                    {{ line.level }}
-                  </ElTag>
-                  <span v-if="line.stage" class="text-blue-500">
-                    [{{ line.stage }}]
-                  </span>
-                  <span>{{ line.message }}</span>
-                </div>
-                <ElEmpty
-                  v-if="filteredLogs.length === 0"
-                  description="无日志"
-                />
-              </div>
-            </ElScrollbar>
-          </ElCard>
-        </div>
-      </ElCol>
+          </ElTableColumn>
+          <ElTableColumn label="尝试" width="80">
+            <template #default="{ row }">
+              {{ row.attempt }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="必需" width="80">
+            <template #default="{ row }">
+              <ElTag :type="row.required ? 'danger' : 'info'" size="small">
+                {{ row.required ? '必需' : '可选' }}
+              </ElTag>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="失败策略" width="100">
+            <template #default="{ row }">
+              {{ row.on_failure }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="开始时间" width="160">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="结束时间" width="160">
+            <template #default="{ row }">
+              {{ formatTime(row.finished_at) }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="指标摘要" min-width="200">
+            <template #default="{ row }">
+              {{ metricsSummary(row.metrics_json) }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="错误" min-width="200">
+            <template #default="{ row }">
+              <span v-if="row.error_message" class="text-red-500">
+                [{{ row.error_code || 'ERR' }}] {{ row.error_message }}
+              </span>
+              <span v-else>-</span>
+            </template>
+          </ElTableColumn>
+        </ElTable>
+      </ElCard>
+
+      <!-- 底部：操作 -->
+      <ElCard shadow="never">
+        <template #header>操作</template>
+        <ElButton
+          v-if="isRunning"
+          type="danger"
+          @click="cancelScan"
+        >
+          取消扫描
+        </ElButton>
+        <ElButton
+          v-if="canRetry"
+          type="primary"
+          @click="retryScan"
+        >
+          重试扫描
+        </ElButton>
+        <span v-if="!isRunning && !canRetry" class="text-gray-400">
+          当前状态无可用操作
+        </span>
+      </ElCard>
     </div>
   </Page>
 </template>

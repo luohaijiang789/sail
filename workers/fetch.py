@@ -21,6 +21,24 @@ from workers.celery_app import celery_app
 logger = get_logger("FetchWorker")
 
 
+def _git_env() -> dict[str, str]:
+    """构建 git 子进程环境变量：继承当前环境 + 透传 http(s)_proxy/no_proxy。
+
+    拉远程仓库（如 GitHub）时，若机器配了 clash 等代理，git 需走代理才下得动。
+    """
+    env = os.environ.copy()
+    for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "no_proxy", "NO_PROXY", "ALL_PROXY", "all_proxy"):
+        if os.environ.get(k):
+            env[k] = os.environ[k]
+    return env
+
+
+def _run_git(args: list[str], timeout: int = 300, cwd: str | None = None) -> subprocess.CompletedProcess:
+    """统一 git 调用：带代理环境 + 超时。"""
+    return subprocess.run(args, check=True, capture_output=True, text=True,
+                          timeout=timeout, env=_git_env(), cwd=cwd)
+
+
 def fetch_source(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
     """拉取源码并建立不可变 SourceRevision。
 
@@ -68,29 +86,14 @@ def fetch_source(scan_run_id: int, stage_run_id: int, db: Session) -> dict:
     if commit_sha:
         # 拉指定 commit
         logger.info("fetching_commit", commit_sha=commit_sha)
-        subprocess.run(
-            ["git", "init", str(clone_dir)],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(clone_dir), "remote", "add", "origin", git_url],
-            check=True, capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(clone_dir), "fetch", "--depth", "1", "origin", commit_sha],
-            check=True, capture_output=True, timeout=300,
-        )
-        subprocess.run(
-            ["git", "-C", str(clone_dir), "checkout", "FETCH_HEAD"],
-            check=True, capture_output=True,
-        )
+        _run_git(["git", "init", str(clone_dir)], timeout=60)
+        _run_git(["git", "-C", str(clone_dir), "remote", "add", "origin", git_url], timeout=60)
+        _run_git(["git", "-C", str(clone_dir), "fetch", "--depth", "1", "origin", commit_sha], timeout=600)
+        _run_git(["git", "-C", str(clone_dir), "checkout", "FETCH_HEAD"], timeout=60)
     else:
         # 浅克隆分支
-        logger.info("cloning_branch", branch=branch)
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, git_url, str(clone_dir)],
-            check=True, capture_output=True, timeout=300,
-        )
+        logger.info("cloning_branch", branch=branch, git_url=git_url)
+        _run_git(["git", "clone", "--depth", "1", "--branch", branch, git_url, str(clone_dir)], timeout=600)
 
     # 4. 获取 commit 信息
     commit_sha = subprocess.run(

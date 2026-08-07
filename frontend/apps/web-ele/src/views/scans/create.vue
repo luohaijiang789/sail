@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -18,6 +18,9 @@ import {
   ElSwitch,
 } from 'element-plus';
 
+import { getRepositoriesApi } from '#/api/sail/repositories';
+import { createScanApi } from '#/api/sail/scans';
+
 import type { ScanCreatePayload } from '#/types/sail';
 
 defineOptions({ name: 'ScanCreate' });
@@ -25,11 +28,7 @@ defineOptions({ name: 'ScanCreate' });
 const route = useRoute();
 const router = useRouter();
 
-const repositories = ref([
-  { id: 1, name: 'user-center' },
-  { id: 2, name: 'payment-gateway' },
-  { id: 3, name: 'order-service' },
-]);
+const repositories = ref<any[]>([]);
 
 const scanProfiles = ref([
   { id: 1, name: '标准扫描（含 CodeQL + AI）' },
@@ -38,7 +37,7 @@ const scanProfiles = ref([
 ]);
 
 const form = reactive<ScanCreatePayload>({
-  repositoryId: Number(route.query.repositoryId) || 1,
+  repositoryId: Number(route.query.repositoryId) || 0,
   revision: {
     type: 'branch',
     value: 'main',
@@ -48,6 +47,23 @@ const form = reactive<ScanCreatePayload>({
 });
 
 const submitting = ref(false);
+
+async function loadRepositories() {
+  try {
+    const data = await getRepositoriesApi({ page: 1, pageSize: 50 });
+    repositories.value = (data as any)?.items ?? [];
+    // 若从仓库列表跳来带了 repositoryId，选中它；否则默认第一个
+    if (form.repositoryId === 0 && repositories.value.length > 0) {
+      form.repositoryId = repositories.value[0].id;
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || '加载仓库失败');
+  }
+}
+
+onMounted(() => {
+  loadRepositories();
+});
 
 async function submit() {
   if (!form.repositoryId) {
@@ -60,9 +76,11 @@ async function submit() {
   }
   submitting.value = true;
   try {
-    // TODO: const scan = await createScanApi(form);
-    ElMessage.success('扫描已创建（mock）');
-    router.push('/scans/1').catch(() => {});
+    const scan = await createScanApi(form);
+    ElMessage.success('扫描已创建，开始执行');
+    router.push(`/scans/${(scan as any)?.id ?? ''}`).catch(() => {});
+  } catch (error: any) {
+    ElMessage.error(error?.message || '创建扫描失败');
   } finally {
     submitting.value = false;
   }

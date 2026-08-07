@@ -56,6 +56,20 @@ class StageOut(BaseModel):
     finished_at: datetime | None
     error_code: str | None
     error_message: str | None
+    metrics_json: dict[str, Any] | None = None
+
+
+class ScanStatsOut(BaseModel):
+    """概览统计（dashboard 用）。"""
+
+    total_scans: int
+    running_scans: int
+    succeeded_scans: int
+    total_findings: int
+    high_risk_findings: int
+    total_repositories: int
+    total_api_assets: int
+    recent_scans: list[ScanOut] = Field(default_factory=list)
 
 
 class ScanLogOut(BaseModel):

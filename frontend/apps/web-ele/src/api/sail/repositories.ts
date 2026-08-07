@@ -9,8 +9,8 @@ import { requestClient } from '#/api/request';
 
 export namespace RepositoriesApi {
   export type Query = PageQuery & {
-    repositoryType?: string;
-    lastScanStatus?: string;
+    repository_type?: string;
+    last_scan_status?: string;
   };
 
   export type ValidateResult = {

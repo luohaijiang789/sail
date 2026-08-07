@@ -490,20 +490,21 @@ export interface FeedbackPayload {
 
 // ============ 列表查询通用 ============
 
-/** 分页查询参数 */
+/** 分页查询参数（对齐后端 snake_case：page / page_size） */
 export interface PageQuery {
   page: number;
-  pageSize: number;
+  page_size: number;
   keyword?: string;
   [key: string]: any;
 }
 
-/** 分页返回结构 */
+/** 分页返回结构（对齐后端 snake_case） */
 export interface PageResult<T> {
   items: T[];
   total: number;
   page: number;
-  pageSize: number;
+  page_size: number;
+  has_next: boolean;
 }
 
 /** SSE 事件（09-api-frontend.md /api/scans/{id}/events） */

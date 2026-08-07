@@ -8,17 +8,20 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.pagination import paginate
 from app.api.schemas.common import PaginationParams
-from app.api.schemas.scan import ScanCreate, ScanOut, StageOut
+from app.api.schemas.scan import ScanCreate, ScanOut, ScanStatsOut, StageOut
 from app.application.create_scan import create_scan as create_scan_service
 from app.core.exceptions import ScanRunNotFoundError
 from app.core.logging import get_logger
 from app.core.result import PaginatedResult
-from app.domain.scan_run import ScanRun, ScanStageRun
+from app.domain.api_asset import ApiAsset
+from app.domain.finding import Finding, FindingInstance
+from app.domain.scan_run import SCAN_RUN_RUNNING, ScanRun, ScanStageRun
+from app.domain.source_assets import Repository
 from app.infrastructure.database import get_db
 
 logger = get_logger(__name__)
@@ -73,6 +76,34 @@ def list_scans(
         page=page.page,
         page_size=page.page_size,
         has_next=page.has_next,
+    )
+
+
+@router.get("/stats", response_model=ScanStatsOut)
+def get_scan_stats(db: Session = Depends(get_db)) -> ScanStatsOut:
+    """概览统计：扫描数/运行中/漏洞数/高危/仓库数/API 资产数 + 最近 5 次扫描。"""
+    total_scans = db.execute(select(func.count()).select_from(ScanRun)).scalar() or 0
+    running = db.execute(
+        select(func.count()).select_from(ScanRun).where(ScanRun.status == SCAN_RUN_RUNNING)
+    ).scalar() or 0
+    succeeded = db.execute(
+        select(func.count()).select_from(ScanRun).where(ScanRun.status == "SUCCEEDED")
+    ).scalar() or 0
+    total_findings = db.execute(select(func.count()).select_from(Finding)).scalar() or 0
+    high_risk = db.execute(
+        select(func.count()).select_from(FindingInstance)
+        .where(FindingInstance.final_severity.in_(["HIGH", "CRITICAL"]))
+    ).scalar() or 0
+    total_repos = db.execute(select(func.count()).select_from(Repository)).scalar() or 0
+    total_api_assets = db.execute(select(func.count()).select_from(ApiAsset)).scalar() or 0
+    recent = db.execute(
+        select(ScanRun).order_by(ScanRun.id.desc()).limit(5)
+    ).scalars().all()
+    return ScanStatsOut(
+        total_scans=total_scans, running_scans=running, succeeded_scans=succeeded,
+        total_findings=total_findings, high_risk_findings=high_risk,
+        total_repositories=total_repos, total_api_assets=total_api_assets,
+        recent_scans=[ScanOut.model_validate(s) for s in recent],
     )
 
 

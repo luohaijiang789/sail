@@ -12,15 +12,15 @@ import { requestClient } from '#/api/request';
 
 export namespace FindingsApi {
   export type Query = PageQuery & {
-    repositoryId?: number;
-    scanRunId?: number;
+    repository_id?: number;
+    scan_run_id?: number;
     severity?: Finding['severity'];
     status?: Finding['status'];
-    ruleId?: number;
+    rule_id?: number;
     cwe?: string;
-    apiAssetId?: number;
-    aiVerdict?: string;
-    instanceStatus?: FindingInstance['status'];
+    api_asset_id?: number;
+    ai_verdict?: string;
+    instance_status?: FindingInstance['status'];
   };
 }
 

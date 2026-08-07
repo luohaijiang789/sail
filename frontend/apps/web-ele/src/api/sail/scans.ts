@@ -12,17 +12,19 @@ import { requestClient } from '#/api/request';
 
 export namespace ScansApi {
   export type Query = PageQuery & {
-    repositoryId?: number;
+    repository_id?: number;
     status?: ScanRun['status'];
   };
 
   export type Stats = {
-    totalScans: number;
-    runningScans: number;
-    totalFindings: number;
-    highRiskFindings: number;
-    totalRepositories: number;
-    totalApiAssets: number;
+    total_scans: number;
+    running_scans: number;
+    succeeded_scans: number;
+    total_findings: number;
+    high_risk_findings: number;
+    total_repositories: number;
+    total_api_assets: number;
+    recent_scans: ScanRun[];
   };
 }
 
@@ -44,7 +46,13 @@ export async function getScanApi(scanId: number) {
  * 创建扫描
  */
 export async function createScanApi(data: ScanCreatePayload) {
-  return requestClient.post<ScanRun>('/scans', data);
+  // 后端期望 snake_case，前端用 camelCase，在此映射
+  return requestClient.post<ScanRun>('/scans', {
+    repository_id: data.repositoryId,
+    revision: data.revision,
+    scan_profile_id: data.scanProfileId,
+    ai_analysis: data.aiAnalysis,
+  });
 }
 
 /**

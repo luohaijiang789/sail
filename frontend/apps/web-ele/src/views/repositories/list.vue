@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -11,6 +11,7 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
+  ElMessage,
   ElOption,
   ElSelect,
   ElTable,
@@ -18,60 +19,15 @@ import {
   ElTag,
 } from 'element-plus';
 
-import type { Repository } from '#/types/sail';
+import { getRepositoriesApi } from '#/api/sail/repositories';
 
 defineOptions({ name: 'RepositoryList' });
 
 const router = useRouter();
 
-// mock 数据，真实场景调 getRepositoriesApi
-const repositories = ref<Repository[]>([
-  {
-    id: 1,
-    projectId: 1,
-    name: 'user-center',
-    gitUrl: 'git@github.com:sail/user-center.git',
-    defaultBranch: 'main',
-    credentialId: 1,
-    repositoryType: 'java-spring',
-    lastScannedCommit: 'a1b2c3d',
-    lastScanStatus: 'SUCCEEDED',
-    lastScanAt: '2026-08-06 10:41:00',
-    apiAssetCount: 124,
-    highRiskCount: 5,
-    createdAt: '2026-07-01 09:00:00',
-  },
-  {
-    id: 2,
-    projectId: 1,
-    name: 'payment-gateway',
-    gitUrl: 'git@github.com:sail/payment-gateway.git',
-    defaultBranch: 'main',
-    credentialId: 1,
-    repositoryType: 'java-spring',
-    lastScannedCommit: 'e4f5g6h',
-    lastScanStatus: 'RUNNING',
-    lastScanAt: '2026-08-06 11:02:00',
-    apiAssetCount: 0,
-    highRiskCount: 0,
-    createdAt: '2026-07-02 09:00:00',
-  },
-  {
-    id: 3,
-    projectId: 1,
-    name: 'order-service',
-    gitUrl: 'git@github.com:sail/order-service.git',
-    defaultBranch: 'develop',
-    credentialId: null,
-    repositoryType: 'java-spring',
-    lastScannedCommit: 'i7j8k9l',
-    lastScanStatus: 'PARTIAL_SUCCEEDED',
-    lastScanAt: '2026-08-05 14:52:00',
-    apiAssetCount: 88,
-    highRiskCount: 12,
-    createdAt: '2026-07-03 09:00:00',
-  },
-]);
+// 后端返回 snake_case 字段，直接用 any 避免类型摩擦
+const repositories = ref<any[]>([]);
+const loading = ref(false);
 
 const queryForm = ref({
   keyword: '',
@@ -79,9 +35,31 @@ const queryForm = ref({
   lastScanStatus: '',
 });
 
+async function loadRepositories() {
+  loading.value = true;
+  try {
+    const data = await getRepositoriesApi({
+      page: 1,
+      pageSize: 50,
+    });
+    // 后端返回 { items, total }（经 response wrapper 后 data 即该对象）
+    repositories.value = (data as any)?.items ?? [];
+  } catch (error: any) {
+    ElMessage.error(error?.message || '加载仓库列表失败');
+    repositories.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(() => {
+  loadRepositories();
+});
+
 type TagType = 'danger' | 'info' | 'primary' | 'success' | 'warning';
 
 const statusTagType: Record<string, TagType> = {
+  ACTIVE: 'success',
   SUCCEEDED: 'success',
   RUNNING: 'warning',
   FAILED: 'danger',
@@ -96,12 +74,11 @@ function createScan(row: any) {
 }
 
 function viewRepository(row: any) {
-  // 暂未做仓库详情页，跳到该仓库最近一次扫描
   router.push(`/repositories/${row.id}`).catch(() => {});
 }
 
 function refresh() {
-  // TODO: 调 getRepositoriesApi(queryForm.value)
+  loadRepositories();
 }
 </script>
 
@@ -158,36 +135,30 @@ function refresh() {
         </template>
         <ElTable
           v-if="repositories.length > 0"
+          v-loading="loading"
           :data="repositories"
           stripe
           @row-click="viewRepository"
         >
           <ElTableColumn label="ID" prop="id" width="60" />
           <ElTableColumn label="仓库名" prop="name" min-width="140" />
-          <ElTableColumn label="默认分支" prop="defaultBranch" width="110" />
-          <ElTableColumn label="类型" prop="repositoryType" width="130" />
+          <ElTableColumn label="Git URL" prop="git_url" min-width="260" show-overflow-tooltip />
+          <ElTableColumn label="默认分支" prop="default_branch" width="110" />
+          <ElTableColumn label="类型" prop="repository_type" width="110" />
           <ElTableColumn
             label="最近 commit"
-            prop="lastScannedCommit"
+            prop="last_scanned_commit"
             width="140"
-          />
-          <ElTableColumn label="最近扫描" width="160">
+          >
             <template #default="{ row }">
-              <ElTag
-                v-if="row.lastScanStatus"
-                :type="statusTagType[row.lastScanStatus] || 'info'"
-              >
-                {{ row.lastScanStatus }}
-              </ElTag>
-              <span v-else class="text-gray-400">未扫描</span>
+              {{ row.last_scanned_commit ? row.last_scanned_commit.slice(0, 12) : '—' }}
             </template>
           </ElTableColumn>
-          <ElTableColumn label="API 数" prop="apiAssetCount" width="90" />
-          <ElTableColumn label="高危数" prop="highRiskCount" width="90">
+          <ElTableColumn label="状态" width="110">
             <template #default="{ row }">
-              <span :class="row.highRiskCount > 0 ? 'text-red-500' : ''">
-                {{ row.highRiskCount }}
-              </span>
+              <ElTag :type="statusTagType[row.status] || 'info'">
+                {{ row.status || '—' }}
+              </ElTag>
             </template>
           </ElTableColumn>
           <ElTableColumn label="操作" width="140" fixed="right">

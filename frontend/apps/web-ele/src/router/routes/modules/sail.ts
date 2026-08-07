@@ -19,6 +19,7 @@ const routes: RouteRecordRaw[] = [
     },
     name: 'Scans',
     path: '/scans',
+    component: () => import('#/views/scans/list.vue'),
     children: [
       {
         name: 'ScanCreate',
@@ -27,7 +28,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '创建扫描',
           hideInMenu: true,
-          activePath: '/repositories',
+          activePath: '/scans',
         },
       },
       {
@@ -37,7 +38,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '扫描详情',
           hideInMenu: true,
-          activePath: '/repositories',
+          activePath: '/scans',
         },
       },
     ],

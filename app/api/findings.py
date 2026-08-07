@@ -78,13 +78,45 @@ def update_finding_status(
 
 @router.get("/{finding_id}/evidence")
 def get_finding_evidence(finding_id: int, db: Session = Depends(get_db)) -> dict:
-    """证据包：SARIF 片段、源码上下文、AI Review 响应等。"""
-    # TODO: 聚合 FindingCandidate.evidence_bundle / AiReview.response_json。
-    return {}
+    """证据包：AI Review 结构化输出 + 候选 source/sink/dataflow。"""
+    from app.domain.finding import AiReview, FindingCandidate, FindingInstance
+    inst = db.execute(
+        select(FindingInstance).where(FindingInstance.finding_id == finding_id)
+        .order_by(FindingInstance.id.desc())
+    ).scalars().first()
+    if not inst or not inst.candidate_id:
+        return {"ai_review": None, "candidate": None}
+    cand = db.get(FindingCandidate, inst.candidate_id)
+    review = db.get(AiReview, cand.ai_review_id) if cand and cand.ai_review_id else None
+    return {
+        "ai_review": review.response_json if review else None,
+        "verdict": review.verdict if review else None,
+        "confidence": review.confidence if review else None,
+        "candidate": {
+            "rule_id": cand.rule_id, "raw_severity": cand.raw_severity,
+            "file_path": cand.file_path, "start_line": cand.start_line,
+            "symbol": cand.symbol, "source_location": cand.source_location,
+            "sink_location": cand.sink_location,
+            "dataflow_path": cand.dataflow_path_json,
+        } if cand else None,
+    }
 
 
 @router.get("/{finding_id}/dataflow")
 def get_finding_dataflow(finding_id: int, db: Session = Depends(get_db)) -> dict:
     """数据流可视化：Source → CallPath → Sink 的路径节点。"""
-    # TODO: 从 FindingCandidate.dataflow_path_json 组装 DataflowOut。
-    return {}
+    from app.domain.finding import FindingCandidate, FindingInstance
+    inst = db.execute(
+        select(FindingInstance).where(FindingInstance.finding_id == finding_id)
+        .order_by(FindingInstance.id.desc())
+    ).scalars().first()
+    if not inst or not inst.candidate_id:
+        return {"nodes": [], "source": None, "sink": None}
+    cand = db.get(FindingCandidate, inst.candidate_id)
+    if not cand:
+        return {"nodes": [], "source": None, "sink": None}
+    return {
+        "source": cand.source_location,
+        "sink": cand.sink_location,
+        "nodes": cand.dataflow_path_json or [],
+    }
