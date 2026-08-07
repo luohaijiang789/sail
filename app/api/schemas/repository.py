@@ -45,6 +45,10 @@ class RepositoryOut(BaseModel):
     repository_type: str
     last_scanned_commit: str | None
     status: str
+    project_name: str | None = None
+    last_scan_status: str | None = None
+    api_asset_count: int = 0
+    high_risk_count: int = 0
     created_at: datetime
 
 

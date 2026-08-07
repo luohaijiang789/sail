@@ -33,20 +33,72 @@ def list_findings(
     severity: str | None = None,
     status: str | None = None,
     repository_id: int | None = None,
+    keyword: str | None = None,
+    statuses: str | None = None,
+    rule_ids: str | None = None,
+    cwes: str | None = None,
+    ai_verdicts: str | None = None,
     db: Session = Depends(get_db),
 ) -> PaginatedResult[FindingListOut]:
-    """漏洞列表，支持按 ``severity`` / ``status`` / ``repository_id`` 过滤 + 分页。"""
+    """漏洞列表，支持 keyword 模糊 + 多选(逗号分隔) + repository_id 过滤 + 分页。"""
+    from app.domain.api_asset import ApiAsset
+    from app.domain.finding import FindingInstance, Rule
+
     stmt = select(Finding).order_by(Finding.id.desc())
     if severity:
-        stmt = stmt.where(Finding.severity == severity)
+        # severity 支持单值与逗号分隔多值
+        stmt = stmt.where(Finding.severity.in_(severity.split(",")))
     if status:
         stmt = stmt.where(Finding.status == status)
+    if statuses:
+        stmt = stmt.where(Finding.status.in_(statuses.split(",")))
     if repository_id is not None:
         stmt = stmt.where(Finding.repository_id == repository_id)
+    if rule_ids:
+        stmt = stmt.where(Finding.rule_id.in_(
+            [int(x) for x in rule_ids.split(",") if x.isdigit()]))
+    if cwes:
+        stmt = stmt.where(Finding.rule_id.in_(
+            select(Rule.id).where(Rule.cwe.in_(cwes.split(",")))))
+    if keyword:
+        # ponytail: Finding 无 file_path 列，keyword 只匹配 title
+        stmt = stmt.where(Finding.title.like(f"%{keyword}%"))
+    # ponytail: ai_verdicts 过滤需 join FindingInstance，阶段一暂不实现
 
     page = paginate(db, stmt, pagination)
+    # 预载关联：Rule → rule_key/cwe，ApiAsset → api_path
+    rule_ids_in_page = [f.rule_id for f in page.items if f.rule_id]
+    rule_map = {r.id: r for r in db.execute(
+        select(Rule).where(Rule.id.in_(rule_ids_in_page))
+    ).scalars().all()} if rule_ids_in_page else {}
+    asset_ids = [f.api_asset_id for f in page.items if f.api_asset_id]
+    assets = {a.id: a for a in db.execute(
+        select(ApiAsset).where(ApiAsset.id.in_(asset_ids))
+    ).scalars().all()} if asset_ids else {}
+    # 批量取最近 instance 的 ai_verdict（denormalized on FindingInstance）
+    finding_ids = [f.id for f in page.items]
+    ai_verdicts_map: dict[int, str | None] = {}
+    if finding_ids:
+        for fid, verdict in db.execute(
+            select(FindingInstance.finding_id, FindingInstance.ai_verdict)
+            .where(FindingInstance.finding_id.in_(finding_ids))
+            .order_by(FindingInstance.finding_id, FindingInstance.id.desc())
+        ).all():
+            if fid not in ai_verdicts_map:  # first occurrence = latest
+                ai_verdicts_map[fid] = verdict
+    items = []
+    for f in page.items:
+        out = FindingListOut.model_validate(f)
+        rule = rule_map.get(f.rule_id)
+        if rule:
+            out.rule_key = rule.rule_key
+            out.cwe = rule.cwe
+        if f.api_asset_id and f.api_asset_id in assets:
+            out.api_path = assets[f.api_asset_id].full_path or assets[f.api_asset_id].path
+        out.ai_verdict = ai_verdicts_map.get(f.id)
+        items.append(out)
     return PaginatedResult[FindingListOut](
-        items=[FindingListOut.model_validate(f) for f in page.items],
+        items=items,
         total=page.total,
         page=page.page,
         page_size=page.page_size,

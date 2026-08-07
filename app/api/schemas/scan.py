@@ -39,6 +39,8 @@ class ScanOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     mode: str
+    repository_name: str | None = None
+    finding_count: int = 0
 
 
 class StageOut(BaseModel):

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_api_asset
@@ -41,18 +41,81 @@ def list_api_assets(
     pagination: PaginationParams = Depends(),
     scan_run_id: int | None = None,
     repository_id: int | None = None,
+    keyword: str | None = None,
+    http_methods: str | None = None,
+    frameworks: str | None = None,
+    security_levels: str | None = None,
+    min_score: int | None = None,
+    max_score: int | None = None,
+    min_finding_count: int | None = None,
+    max_finding_count: int | None = None,
     db: Session = Depends(get_db),
 ) -> PaginatedResult[ApiAssetListOut]:
-    """API 资产列表，支持按 ``scan_run_id`` / ``repository_id`` 过滤 + 分页。
+    """API 资产列表，支持 keyword/多选/范围筛选 + 分页。
 
-    列表精简版额外补 ``overall_score``（来自 ApiSecurityProfile）与 ``finding_count``
-    （关联 Finding 数），用批量查询避免逐行 N+1。
+    overall_score/finding_count 用批量查询避免逐行 N+1。security_levels 按 score
+    范围映射过滤（SAFE<25, LOW_RISK 25-49, MEDIUM_RISK 50-69, HIGH_RISK 70-84,
+    CRITICAL 85+），score/count 过滤用相关子查询保持分页正确。
     """
     stmt = select(ApiAsset).order_by(ApiAsset.id.desc())
     if scan_run_id is not None:
         stmt = stmt.where(ApiAsset.scan_run_id == scan_run_id)
     if repository_id is not None:
         stmt = stmt.where(ApiAsset.repository_id == repository_id)
+    if keyword:
+        kw = f"%{keyword}%"
+        stmt = stmt.where(or_(
+            ApiAsset.controller_class.like(kw),
+            ApiAsset.path.like(kw),
+            ApiAsset.full_path.like(kw),
+        ))
+    if http_methods:
+        stmt = stmt.where(ApiAsset.http_method.in_(http_methods.split(",")))
+    if frameworks:
+        stmt = stmt.where(ApiAsset.framework.in_(frameworks.split(",")))
+    # score 过滤：相关子查询取最新 ApiSecurityProfile.overall_score
+    if min_score is not None or max_score is not None or security_levels:
+        latest_score = (
+            select(ApiSecurityProfile.overall_score)
+            .where(ApiSecurityProfile.api_asset_id == ApiAsset.id)
+            .order_by(ApiSecurityProfile.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        if min_score is not None:
+            stmt = stmt.where(latest_score >= min_score)
+        if max_score is not None:
+            stmt = stmt.where(latest_score <= max_score)
+        if security_levels:
+            level_ranges = {
+                "SAFE": (None, 25),
+                "LOW_RISK": (25, 50),
+                "MEDIUM_RISK": (50, 70),
+                "HIGH_RISK": (70, 85),
+                "CRITICAL": (85, None),
+            }
+            level_conds = []
+            for lvl in security_levels.split(","):
+                lo, hi = level_ranges.get(lvl.strip(), (None, None))
+                if lo is not None and hi is not None:
+                    level_conds.append(latest_score.between(lo, hi - 1))
+                elif lo is not None:
+                    level_conds.append(latest_score >= lo)
+                elif hi is not None:
+                    level_conds.append(latest_score < hi)
+            if level_conds:
+                stmt = stmt.where(or_(*level_conds))
+    # finding_count 过滤：相关子查询
+    if min_finding_count is not None or max_finding_count is not None:
+        fc_subq = (
+            select(func.count(Finding.id))
+            .where(Finding.api_asset_id == ApiAsset.id)
+            .scalar_subquery()
+        )
+        if min_finding_count is not None:
+            stmt = stmt.where(fc_subq >= min_finding_count)
+        if max_finding_count is not None:
+            stmt = stmt.where(fc_subq <= max_finding_count)
 
     page = paginate(db, stmt, pagination)
     asset_ids = [a.id for a in page.items]
@@ -81,6 +144,7 @@ def list_api_assets(
             controller_class=a.controller_class,
             overall_score=scores.get(a.id),
             finding_count=finding_counts.get(a.id, 0),
+            param_count=len(a.parameters_json) if a.parameters_json else 0,
             status=a.status,
         )
         for a in page.items

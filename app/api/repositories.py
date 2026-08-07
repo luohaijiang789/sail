@@ -8,7 +8,7 @@ from __future__ import annotations
 import subprocess
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_repository
@@ -66,20 +66,77 @@ def create_repository(payload: RepositoryCreate, db: Session = Depends(get_db)) 
 @router.get("/", response_model=PaginatedResult[RepositoryOut])
 def list_repositories(
     pagination: PaginationParams = Depends(),
-    name: str | None = None,
+    keyword: str | None = None,
     project_id: int | None = None,
+    repository_types: str | None = None,
+    last_scan_statuses: str | None = None,
+    min_api_count: int | None = None,
+    max_api_count: int | None = None,
+    min_high_risk: int | None = None,
+    max_high_risk: int | None = None,
     db: Session = Depends(get_db),
 ) -> PaginatedResult[RepositoryOut]:
-    """仓库列表，支持分页与 ``name`` 模糊筛选、``project_id`` 过滤。"""
+    """仓库列表，支持关键字/多选/范围筛选。"""
+    from app.domain.api_asset import ApiAsset
+    from app.domain.finding import Finding
+    from app.domain.source_assets import Project
+
     stmt = select(Repository).order_by(Repository.id.desc())
-    if name:
-        stmt = stmt.where(Repository.name.like(f"%{name}%"))
+    if keyword:
+        kw = f"%{keyword}%"
+        stmt = stmt.where(or_(Repository.name.like(kw), Repository.git_url.like(kw)))
     if project_id is not None:
         stmt = stmt.where(Repository.project_id == project_id)
+    if repository_types:
+        stmt = stmt.where(Repository.repository_type.in_(repository_types.split(",")))
+    if last_scan_statuses:
+        # ponytail: last_scan_status 来自关联 ScanRun，阶段一按 Repository.status 近似
+        stmt = stmt.where(Repository.status.in_(last_scan_statuses.split(",")))
+    if min_api_count is not None or max_api_count is not None:
+        api_cnt = select(func.count(ApiAsset.id)).where(
+            ApiAsset.repository_id == Repository.id
+        ).scalar_subquery()
+        if min_api_count is not None:
+            stmt = stmt.where(api_cnt >= min_api_count)
+        if max_api_count is not None:
+            stmt = stmt.where(api_cnt <= max_api_count)
+    if min_high_risk is not None or max_high_risk is not None:
+        hr_cnt = select(func.count(Finding.id)).where(
+            Finding.repository_id == Repository.id,
+            Finding.severity.in_(["HIGH", "CRITICAL"]),
+        ).scalar_subquery()
+        if min_high_risk is not None:
+            stmt = stmt.where(hr_cnt >= min_high_risk)
+        if max_high_risk is not None:
+            stmt = stmt.where(hr_cnt <= max_high_risk)
 
     page = paginate(db, stmt, pagination)
+    # 填充冗余字段
+    projects = {p.id: p.name for p in db.execute(select(Project)).scalars().all()}
+    repo_ids = [r.id for r in page.items]
+    api_counts: dict[int, int] = {}
+    hr_counts: dict[int, int] = {}
+    if repo_ids:
+        api_counts = dict(db.execute(
+            select(ApiAsset.repository_id, func.count(ApiAsset.id))
+            .where(ApiAsset.repository_id.in_(repo_ids))
+            .group_by(ApiAsset.repository_id)
+        ).all())
+        hr_counts = dict(db.execute(
+            select(Finding.repository_id, func.count(Finding.id))
+            .where(Finding.repository_id.in_(repo_ids),
+                   Finding.severity.in_(["HIGH", "CRITICAL"]))
+            .group_by(Finding.repository_id)
+        ).all())
+    items = []
+    for r in page.items:
+        out = RepositoryOut.model_validate(r)
+        out.project_name = projects.get(r.project_id)
+        out.api_asset_count = api_counts.get(r.id, 0)
+        out.high_risk_count = hr_counts.get(r.id, 0)
+        items.append(out)
     return PaginatedResult[RepositoryOut](
-        items=[RepositoryOut.model_validate(r) for r in page.items],
+        items=items,
         total=page.total,
         page=page.page,
         page_size=page.page_size,

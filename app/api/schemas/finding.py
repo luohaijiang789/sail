@@ -70,6 +70,11 @@ class FindingListOut(BaseModel):
     rule_id: int | None = None
     first_seen_commit: str | None = None
     last_seen_commit: str | None = None
+    rule_key: str | None = None
+    cwe: str | None = None
+    ai_verdict: str | None = None
+    api_path: str | None = None
+    repository_id: int | None = None
     created_at: datetime
 
 

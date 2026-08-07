@@ -60,18 +60,56 @@ def list_scans(
     pagination: PaginationParams = Depends(),
     repository_id: int | None = None,
     status: str | None = None,
+    keyword: str | None = None,
+    statuses: str | None = None,
+    build_qualities: str | None = None,
+    modes: str | None = None,
     db: Session = Depends(get_db),
 ) -> PaginatedResult[ScanOut]:
-    """扫描列表，支持按 ``repository_id`` / ``status`` 过滤 + 分页。"""
+    """扫描列表，支持按 ``repository_id`` / ``status`` / ``keyword`` / 多选过滤 + 分页。"""
     stmt = select(ScanRun).order_by(ScanRun.id.desc())
     if repository_id is not None:
         stmt = stmt.where(ScanRun.repository_id == repository_id)
     if status:
         stmt = stmt.where(ScanRun.status == status)
+    if statuses:
+        stmt = stmt.where(ScanRun.status.in_(statuses.split(",")))
+    if build_qualities:
+        stmt = stmt.where(ScanRun.build_quality.in_(build_qualities.split(",")))
+    if modes:
+        stmt = stmt.where(ScanRun.mode.in_(modes.split(",")))
+    if keyword:
+        # keyword 匹配仓库名：先查仓库 id，再按 repository_id 过滤
+        repo_ids = [r.id for r in db.execute(
+            select(Repository).where(Repository.name.like(f"%{keyword}%"))
+        ).scalars().all()]
+        if repo_ids:
+            stmt = stmt.where(ScanRun.repository_id.in_(repo_ids))
+        else:
+            stmt = stmt.where(False)  # 无匹配仓库 → 空结果
 
     page = paginate(db, stmt, pagination)
+    # 填充冗余字段：批量查仓库名 + finding_count
+    repo_ids = {s.repository_id for s in page.items}
+    repos = {r.id: r.name for r in db.execute(
+        select(Repository).where(Repository.id.in_(repo_ids))
+    ).scalars().all()} if repo_ids else {}
+    scan_ids = [s.id for s in page.items]
+    finding_counts: dict[int, int] = {}
+    if scan_ids:
+        finding_counts = dict(db.execute(
+            select(FindingInstance.scan_run_id, func.count(FindingInstance.id))
+            .where(FindingInstance.scan_run_id.in_(scan_ids))
+            .group_by(FindingInstance.scan_run_id)
+        ).all())
+    items = []
+    for s in page.items:
+        out = ScanOut.model_validate(s)
+        out.repository_name = repos.get(s.repository_id)
+        out.finding_count = finding_counts.get(s.id, 0)
+        items.append(out)
     return PaginatedResult[ScanOut](
-        items=[ScanOut.model_validate(s) for s in page.items],
+        items=items,
         total=page.total,
         page=page.page,
         page_size=page.page_size,

@@ -63,6 +63,7 @@ class ApiAssetListOut(BaseModel):
     controller_class: str
     overall_score: int | None = Field(default=None, description="安全画像总分，无画像时为 None")
     finding_count: int = Field(default=0, description="关联漏洞数")
+    param_count: int = 0
     status: str
 
 
