@@ -6,20 +6,29 @@ import { Page } from '@vben/common-ui';
 
 import {
   ElCard,
+  ElCol,
   ElDescriptions,
   ElDescriptionsItem,
   ElEmpty,
-  ElScrollbar,
+  ElMessage,
+  ElOption,
+  ElRow,
+  ElSelect,
   ElTag,
   ElTimeline,
   ElTimelineItem,
 } from 'element-plus';
-
+import SailProTable from '#/components/sail-pro-table/index.vue';
+import type { SailColumn, SailFetcher } from '#/components/sail-pro-table/types';
 import {
   getFindingApi,
   getFindingDataflowApi,
   getFindingEvidenceApi,
+  getFindingInstancesApi,
+  updateFindingStatusApi,
 } from '#/api/sail/findings';
+import { statusTagType } from '#/utils/status-colors';
+import { fmtCommit, fmtTime } from '#/utils/formatters';
 
 defineOptions({ name: 'FindingDetail' });
 
@@ -30,79 +39,37 @@ const finding = ref<any>(null);
 const dataflow = ref<any>(null);
 const evidence = ref<any>(null);
 const loading = ref(false);
+const statusSaving = ref(false);
 
-type TagType = 'danger' | 'info' | 'primary' | 'success' | 'warning';
-
-const severityTagType: Record<string, TagType> = {
-  CRITICAL: 'danger',
-  HIGH: 'danger',
-  MEDIUM: 'warning',
-  LOW: 'info',
-  INFO: 'info',
-};
-
-const verdictTagType: Record<string, TagType> = {
-  TRUE_POSITIVE: 'danger',
-  LIKELY_TRUE_POSITIVE: 'danger',
-  UNCERTAIN: 'warning',
-  LIKELY_FALSE_POSITIVE: 'info',
-  FALSE_POSITIVE: 'info',
-  NEED_MORE_CONTEXT: 'warning',
-  INSUFFICIENT_CONTEXT: 'info',
-};
-
-const stepTagType: Record<string, TagType> = {
-  SOURCE: 'warning',
-  CALL_PATH: 'info',
-  SINK: 'danger',
-};
-
-// 统一成展示用的步骤列表：source → nodes → sink
-const flowSteps = computed(() => {
+// 数据流是否完全缺失（source/sink/nodes 全空）
+const hasFlow = computed(() => {
   const df = dataflow.value;
-  if (!df) return [];
-  const steps: any[] = [];
-  if (df.source) {
-    steps.push({
-      step: 0,
-      kind: 'SOURCE',
-      symbol: df.source.symbol,
-      file: df.source.file,
-      line: df.source.line,
-      desc: 'Source',
-    });
-  }
-  for (const n of df.nodes ?? []) {
-    steps.push({
-      step: n.step,
-      kind: 'CALL_PATH',
-      symbol: '',
-      file: n.file,
-      line: n.line,
-      desc: n.desc,
-    });
-  }
-  if (df.sink) {
-    steps.push({
-      step: (df.nodes?.length ?? 0) + 1,
-      kind: 'SINK',
-      symbol: df.sink.symbol,
-      file: df.sink.file,
-      line: df.sink.line,
-      desc: 'Sink',
-    });
-  }
-  return steps;
+  return !!(df && (df.source || df.sink || (df.nodes && df.nodes.length)));
 });
 
-const reasoning = computed(() => evidence.value?.ai_review?.reasoning ?? null);
+const instanceColumns: SailColumn[] = [
+  { prop: 'id', label: '实例ID', width: 80 },
+  { prop: 'file_path', label: '文件', minWidth: 200, showOverflowTooltip: true },
+  { prop: 'start_line', label: '行', width: 70 },
+  { prop: 'symbol', label: '符号', minWidth: 140, showOverflowTooltip: true },
+  { prop: 'final_severity', label: '严重度', width: 90, tag: true },
+  { prop: 'ai_verdict', label: 'AI结论', width: 130, tag: true },
+  { prop: 'ai_confidence', label: '置信度', width: 90 },
+  { prop: 'risk_score', label: '风险分', width: 80 },
+  { prop: 'status', label: '实例状态', width: 100, tag: true },
+  {
+    prop: 'created_at',
+    label: '扫描时间',
+    width: 150,
+    formatter: (r) => fmtTime(r.created_at),
+  },
+];
 
-const filePath = computed(
-  () =>
-    evidence.value?.candidate?.file_path ??
-    dataflow.value?.source?.file ??
-    '-',
-);
+// 实例列表后端返回 bare array，包一层给 SailProTable
+const loadInstances: SailFetcher = async () => {
+  const items = (await getFindingInstancesApi(findingId.value)) ?? [];
+  return { items, total: items.length };
+};
 
 async function load() {
   loading.value = true;
@@ -120,118 +87,150 @@ async function load() {
   }
 }
 
+async function updateStatus() {
+  if (!finding.value) return;
+  statusSaving.value = true;
+  try {
+    await updateFindingStatusApi(findingId.value, {
+      status: finding.value.status,
+    });
+    ElMessage.success('状态已更新');
+    // 刷新 finding（重拉 join 后的展示字段）
+    finding.value = await getFindingApi(findingId.value);
+  } catch (e: any) {
+    ElMessage.error(e?.message || '状态更新失败');
+    // 回滚：重新拉取以恢复 select 绑定值
+    finding.value = await getFindingApi(findingId.value);
+  } finally {
+    statusSaving.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
 <template>
-  <Page description="漏洞详情" :title="finding?.title ?? '加载中...'">
-    <div v-loading="loading" class="p-4">
-      <!-- 基本信息 -->
-      <ElCard v-if="finding" shadow="never" class="mb-4">
-        <template #header>基本信息</template>
-        <ElDescriptions :column="3" border>
-          <ElDescriptionsItem label="严重度">
-            <ElTag :type="severityTagType[finding.severity]">
-              {{ finding.severity }}
-            </ElTag>
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="状态">
-            <ElTag>{{ finding.status }}</ElTag>
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="规则 ID">
-            {{ finding.rule_id }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="文件">
-            {{ filePath }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="首次提交">
-            {{ finding.first_seen_commit }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="最近提交">
-            {{ finding.last_seen_commit }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="发现时间">
-            {{ finding.created_at }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="描述" :span="2">
-            {{ finding.description || '-' }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="修复建议" :span="3">
-            {{ finding.remediation || '暂无修复建议' }}
-          </ElDescriptionsItem>
-        </ElDescriptions>
-      </ElCard>
-
-      <!-- 数据流 + AI Review -->
-      <div class="md:flex">
-        <!-- 数据流可视化 -->
-        <ElCard shadow="never" class="mb-4 md:mr-4 md:w-1/2">
-          <template #header>数据流 Source → CallPath → Sink</template>
-          <ElTimeline v-if="flowSteps.length > 0">
-            <ElTimelineItem
-              v-for="node in flowSteps"
-              :key="node.step"
-              :type="
-                node.kind === 'SINK'
-                  ? 'danger'
-                  : node.kind === 'SOURCE'
-                    ? 'warning'
-                    : 'primary'
-              "
-            >
-              <div class="flex items-center gap-2">
-                <ElTag size="small" :type="stepTagType[node.kind] ?? 'info'">
-                  {{ node.kind }}
+  <Page :title="finding?.title || '漏洞详情'">
+    <div v-loading="loading" class="p-4 space-y-4">
+      <ElRow v-if="finding" :gutter="16">
+        <!-- 左：基本信息 -->
+        <ElCol :span="8">
+          <ElCard shadow="never">
+            <template #header>基本信息</template>
+            <ElDescriptions :column="1" border>
+              <ElDescriptionsItem label="严重度">
+                <ElTag :type="statusTagType(finding.severity)">
+                  {{ finding.severity }}
                 </ElTag>
-                <span v-if="node.symbol" class="font-mono text-xs">
-                  {{ node.symbol }}
-                </span>
-              </div>
-              <div class="mt-1 text-xs text-gray-500">
-                {{ node.file }}:{{ node.line }}
-              </div>
-              <div v-if="node.desc" class="mt-1 text-xs text-gray-600">
-                {{ node.desc }}
-              </div>
-            </ElTimelineItem>
-          </ElTimeline>
-          <ElEmpty v-else description="无数据流" />
-        </ElCard>
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="规则">
+                {{ finding.rule_key || '—' }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="CWE">
+                {{ finding.cwe || '—' }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="文件">
+                {{ finding.file_path || '—' }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="所属API">
+                {{ finding.api_path || '—' }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="首次commit">
+                {{ fmtCommit(finding.first_seen_commit) }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="状态">
+                <ElSelect
+                  v-model="finding.status"
+                  :loading="statusSaving"
+                  size="small"
+                  style="width: 160px"
+                  @change="updateStatus"
+                >
+                  <ElOption label="OPEN" value="OPEN" />
+                  <ElOption label="FIXED" value="FIXED" />
+                  <ElOption label="REAPPEARED" value="REAPPEARED" />
+                  <ElOption label="FALSE_POSITIVE" value="FALSE_POSITIVE" />
+                </ElSelect>
+              </ElDescriptionsItem>
+            </ElDescriptions>
+          </ElCard>
+        </ElCol>
 
-        <!-- AI Review -->
-        <ElCard shadow="never" class="mb-4 md:w-1/2">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <span>AI Review</span>
-              <ElTag
-                v-if="evidence?.verdict"
-                size="small"
-                :type="verdictTagType[evidence.verdict] ?? 'info'"
+        <!-- 中：数据流 -->
+        <ElCol :span="10">
+          <ElCard shadow="never">
+            <template #header>数据流 Source → Sink</template>
+            <ElTimeline v-if="hasFlow">
+              <ElTimelineItem
+                v-if="dataflow?.source"
+                type="warning"
+                :timestamp="`L${dataflow.source.line ?? '?'}`"
               >
-                {{ evidence.verdict }}
-              </ElTag>
-            </div>
-          </template>
-          <ElDescriptions :column="1" size="small" border>
-            <ElDescriptionsItem label="置信度">
-              {{ evidence?.confidence ?? '-' }}
-            </ElDescriptionsItem>
-          </ElDescriptions>
-
-          <div class="mt-3">
-            <div class="mb-1 text-xs font-medium text-gray-500">推理过程</div>
-            <ElScrollbar height="240px">
-              <div v-if="reasoning" class="space-y-2 text-xs">
-                <div v-for="(v, k) in reasoning" :key="k">
-                  <span class="text-blue-500">{{ k }}：</span>
-                  {{ v }}
+                <div class="font-mono text-xs">
+                  Source: {{ dataflow.source.file }}
                 </div>
-              </div>
-              <ElEmpty v-else description="暂无推理信息" />
-            </ElScrollbar>
-          </div>
-        </ElCard>
-      </div>
+                <div
+                  v-if="dataflow.source.symbol"
+                  class="mt-1 text-xs text-gray-500"
+                >
+                  {{ dataflow.source.symbol }}
+                </div>
+              </ElTimelineItem>
+              <ElTimelineItem
+                v-for="(node, i) in dataflow?.nodes || []"
+                :key="i"
+                type="primary"
+                :timestamp="`L${node.line ?? '?'}`"
+              >
+                <div class="text-xs">{{ node.desc || node.file }}</div>
+                <div class="mt-1 text-xs text-gray-500">{{ node.file }}</div>
+              </ElTimelineItem>
+              <ElTimelineItem
+                v-if="dataflow?.sink"
+                type="danger"
+                :timestamp="`L${dataflow.sink.line ?? '?'}`"
+              >
+                <div class="font-mono text-xs">
+                  Sink: {{ dataflow.sink.symbol || dataflow.sink.file }}
+                </div>
+                <div
+                  v-if="dataflow.sink.file && dataflow.sink.symbol"
+                  class="mt-1 text-xs text-gray-500"
+                >
+                  {{ dataflow.sink.file }}
+                </div>
+              </ElTimelineItem>
+            </ElTimeline>
+            <ElEmpty v-else description="无数据流数据" />
+          </ElCard>
+        </ElCol>
+
+        <!-- 右：AI 分析 -->
+        <ElCol :span="6">
+          <ElCard shadow="never">
+            <template #header>AI 分析</template>
+            <ElDescriptions :column="1" border>
+              <ElDescriptionsItem label="判定">
+                <ElTag :type="statusTagType(evidence?.verdict)">
+                  {{ evidence?.verdict || '—' }}
+                </ElTag>
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="置信度">
+                {{ evidence?.confidence ?? '—' }}
+              </ElDescriptionsItem>
+              <ElDescriptionsItem label="修复建议">
+                {{ finding?.remediation || '—' }}
+              </ElDescriptionsItem>
+            </ElDescriptions>
+          </ElCard>
+        </ElCol>
+      </ElRow>
+
+      <!-- 底：历史实例 -->
+      <ElCard shadow="never">
+        <template #header>历史实例</template>
+        <SailProTable :columns="instanceColumns" :fetcher="loadInstances" />
+      </ElCard>
     </div>
   </Page>
 </template>

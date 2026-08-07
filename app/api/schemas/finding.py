@@ -11,7 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FindingOut(BaseModel):
-    """漏洞完整输出。对应 ``Finding`` 表字段，含关联 ``api_asset_id``。"""
+    """漏洞完整输出。对应 ``Finding`` 表字段，含关联 ``api_asset_id``。
+
+    列表端点已 join 出的展示字段（rule_key/cwe/api_path/file_path/ai_verdict）
+    在详情端点同样填充，前端详情页直接复用，避免二次请求。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,6 +34,12 @@ class FindingOut(BaseModel):
     description: str | None
     remediation: str | None
     created_at: datetime
+    # 关联展示字段（详情端点 join 填充，详见 app/api/findings.py:get_finding）
+    rule_key: str | None = None
+    cwe: str | None = None
+    file_path: str | None = None
+    api_path: str | None = None
+    ai_verdict: str | None = None
 
 
 class FindingInstanceOut(BaseModel):

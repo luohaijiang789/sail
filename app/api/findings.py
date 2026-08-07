@@ -13,6 +13,7 @@ from app.api.deps import require_finding
 from app.api.pagination import paginate
 from app.api.schemas.common import PaginationParams
 from app.api.schemas.finding import (
+    FindingInstanceOut,
     FindingListOut,
     FindingOut,
     FindingStatusUpdate,
@@ -109,9 +110,35 @@ def list_findings(
 @router.get("/{finding_id}", response_model=FindingOut)
 def get_finding(
     finding: Finding = Depends(require_finding),
+    db: Session = Depends(get_db),
 ) -> FindingOut:
-    """漏洞详情：基本信息 + 关联 api_asset_id。``require_finding`` 完成存在性校验。"""
-    return FindingOut.model_validate(finding)
+    """漏洞详情：基本信息 + 关联展示字段（rule_key/cwe/api_path/file_path/ai_verdict）。
+
+    与列表端点对齐：join Rule → rule_key/cwe，ApiAsset → api_path，
+    最近一次 FindingInstance → ai_verdict/file_path。``require_finding`` 完成存在性校验。
+    """
+    from app.domain.api_asset import ApiAsset
+    from app.domain.finding import FindingInstance, Rule
+
+    out = FindingOut.model_validate(finding)
+    if finding.rule_id:
+        rule = db.get(Rule, finding.rule_id)
+        if rule:
+            out.rule_key = rule.rule_key
+            out.cwe = rule.cwe
+    if finding.api_asset_id:
+        asset = db.get(ApiAsset, finding.api_asset_id)
+        if asset:
+            out.api_path = asset.full_path or asset.path
+    inst = db.execute(
+        select(FindingInstance)
+        .where(FindingInstance.finding_id == finding.id)
+        .order_by(FindingInstance.id.desc())
+    ).scalars().first()
+    if inst:
+        out.ai_verdict = inst.ai_verdict
+        out.file_path = inst.file_path
+    return out
 
 
 @router.patch("/{finding_id}/status", response_model=FindingOut)
@@ -172,3 +199,18 @@ def get_finding_dataflow(finding_id: int, db: Session = Depends(get_db)) -> dict
         "sink": cand.sink_location,
         "nodes": cand.dataflow_path_json or [],
     }
+
+
+@router.get("/{finding_id}/instances", response_model=list[FindingInstanceOut])
+def list_finding_instances(
+    finding: Finding = Depends(require_finding),
+    db: Session = Depends(get_db),
+) -> list[FindingInstanceOut]:
+    """漏洞历史实例：同一漏洞跨扫描的具体定位与 AI 结论，按时间倒序。"""
+    from app.domain.finding import FindingInstance
+    rows = db.execute(
+        select(FindingInstance)
+        .where(FindingInstance.finding_id == finding.id)
+        .order_by(FindingInstance.id.desc())
+    ).scalars().all()
+    return [FindingInstanceOut.model_validate(r) for r in rows]

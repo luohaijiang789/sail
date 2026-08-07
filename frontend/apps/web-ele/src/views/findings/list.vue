@@ -1,113 +1,97 @@
 <script lang="ts" setup>
-import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import {
-  ElCard,
-  ElEmpty,
-  ElForm,
-  ElFormItem,
-  ElOption,
-  ElSelect,
-  ElTable,
-  ElTableColumn,
-  ElTag,
-} from 'element-plus';
-
+import SailProTable from '#/components/sail-pro-table/index.vue';
+import type { SailColumn, SailFilter } from '#/components/sail-pro-table/types';
 import { getFindingsApi } from '#/api/sail/findings';
+import { fmtCommit, fmtTime } from '#/utils/formatters';
 
 defineOptions({ name: 'FindingList' });
 
 const router = useRouter();
 
-const findings = ref<any[]>([]);
-const loading = ref(false);
-const severity = ref('');
+const columns: SailColumn[] = [
+  { prop: 'id', label: 'ID', width: 60 },
+  { prop: 'title', label: '标题', minWidth: 200 },
+  { prop: 'severity', label: '严重度', width: 90, tag: true },
+  { prop: 'rule_key', label: '规则', width: 130 },
+  { prop: 'cwe', label: 'CWE', width: 80 },
+  { prop: 'ai_verdict', label: 'AI结论', width: 130, tag: true },
+  { prop: 'file_path', label: '文件', minWidth: 180, showOverflowTooltip: true },
+  { prop: 'api_path', label: '所属API', width: 140 },
+  { prop: 'status', label: '状态', width: 90, tag: true },
+  {
+    prop: 'first_seen_commit',
+    label: '首次commit',
+    width: 130,
+    formatter: (r) => fmtCommit(r.first_seen_commit),
+  },
+  {
+    prop: 'created_at',
+    label: '时间',
+    width: 150,
+    formatter: (r) => fmtTime(r.created_at),
+  },
+];
 
-type TagType = 'danger' | 'info' | 'primary' | 'success' | 'warning';
-
-const severityTagType: Record<string, TagType> = {
-  CRITICAL: 'danger',
-  HIGH: 'danger',
-  MEDIUM: 'warning',
-  LOW: 'info',
-  INFO: 'info',
-};
-
-async function load() {
-  loading.value = true;
-  try {
-    const res: any = await getFindingsApi({
-      repository_id: 2,
-      page: 1,
-      page_size: 20,
-      severity: severity.value || undefined,
-    } as any);
-    findings.value = res?.items ?? [];
-  } finally {
-    loading.value = false;
-  }
-}
+const filters: SailFilter[] = [
+  { type: 'keyword', field: 'keyword', label: '关键字', placeholder: '标题/文件' },
+  {
+    type: 'select',
+    field: 'severity',
+    label: '严重度',
+    multiple: true,
+    options: [
+      { label: 'CRITICAL', value: 'CRITICAL' },
+      { label: 'HIGH', value: 'HIGH' },
+      { label: 'MEDIUM', value: 'MEDIUM' },
+      { label: 'LOW', value: 'LOW' },
+      { label: 'INFO', value: 'INFO' },
+    ],
+  },
+  {
+    type: 'select',
+    field: 'ai_verdicts',
+    label: 'AI结论',
+    multiple: true,
+    options: [
+      { label: '真阳', value: 'TRUE_POSITIVE' },
+      { label: '可能真阳', value: 'LIKELY_TRUE_POSITIVE' },
+      { label: '不确定', value: 'UNCERTAIN' },
+      { label: '可能误报', value: 'LIKELY_FALSE_POSITIVE' },
+      { label: '误报', value: 'FALSE_POSITIVE' },
+    ],
+  },
+  {
+    type: 'select',
+    field: 'statuses',
+    label: '状态',
+    multiple: true,
+    options: [
+      { label: 'OPEN', value: 'OPEN' },
+      { label: 'FIXED', value: 'FIXED' },
+      { label: 'REAPPEARED', value: 'REAPPEARED' },
+      { label: 'FALSE_POSITIVE', value: 'FALSE_POSITIVE' },
+    ],
+  },
+];
 
 function goDetail(row: any) {
   router.push(`/findings/${row.id}`).catch(() => {});
 }
-
-onMounted(load);
 </script>
 
 <template>
   <Page description="CodeQL + AI 验证后的漏洞清单" title="漏洞清单">
     <div class="p-4">
-      <!-- 筛选 -->
-      <ElCard shadow="never" class="mb-4">
-        <ElForm :inline="true">
-          <ElFormItem label="严重度">
-            <ElSelect
-              v-model="severity"
-              placeholder="全部"
-              clearable
-              style="width: 140px"
-              @change="load"
-            >
-              <ElOption label="CRITICAL" value="CRITICAL" />
-              <ElOption label="HIGH" value="HIGH" />
-              <ElOption label="MEDIUM" value="MEDIUM" />
-              <ElOption label="LOW" value="LOW" />
-              <ElOption label="INFO" value="INFO" />
-            </ElSelect>
-          </ElFormItem>
-        </ElForm>
-      </ElCard>
-
-      <!-- 列表 -->
-      <ElCard shadow="never">
-        <template #header>漏洞列表</template>
-        <ElTable
-          v-loading="loading"
-          :data="findings"
-          stripe
-          @row-click="goDetail"
-        >
-          <ElTableColumn label="ID" prop="id" width="70" />
-          <ElTableColumn label="标题" prop="title" min-width="240" />
-          <ElTableColumn label="严重度" width="110">
-            <template #default="{ row }">
-              <ElTag size="small" :type="severityTagType[row.severity]">
-                {{ row.severity }}
-              </ElTag>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="状态" prop="status" width="120" />
-          <ElTableColumn label="文件" prop="file_path" min-width="200" />
-          <ElTableColumn label="发现时间" prop="created_at" width="180" />
-          <template #empty>
-            <ElEmpty description="暂无漏洞" />
-          </template>
-        </ElTable>
-      </ElCard>
+      <SailProTable
+        :columns="columns"
+        :fetcher="getFindingsApi"
+        :filters="filters"
+        @row-click="goDetail"
+      />
     </div>
   </Page>
 </template>
