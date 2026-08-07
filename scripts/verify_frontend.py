@@ -11,6 +11,7 @@ PAGES = [
     ("扫描详情", "/scans/2"),
     ("API 资产", "/api-assets"),
     ("漏洞清单", "/findings"),
+    ("check 矩阵", "/check-matrix"),
 ]
 
 

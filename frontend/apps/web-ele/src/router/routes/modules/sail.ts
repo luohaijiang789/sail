@@ -93,6 +93,16 @@ const routes: RouteRecordRaw[] = [
       activePath: '/findings',
     },
   },
+  {
+    meta: {
+      icon: 'mdi:grid',
+      order: 500,
+      title: 'check 矩阵',
+    },
+    name: 'CheckMatrix',
+    path: '/check-matrix',
+    component: () => import('#/views/check-matrix/index.vue'),
+  },
 ];
 
 export default routes;
