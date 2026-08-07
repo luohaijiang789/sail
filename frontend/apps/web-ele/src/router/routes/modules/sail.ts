@@ -103,6 +103,16 @@ const routes: RouteRecordRaw[] = [
     path: '/check-matrix',
     component: () => import('#/views/check-matrix/index.vue'),
   },
+  {
+    meta: {
+      icon: 'mdi:file-chart',
+      order: 600,
+      title: '报告',
+    },
+    name: 'Reports',
+    path: '/reports',
+    component: () => import('#/views/reports/index.vue'),
+  },
 ];
 
 export default routes;

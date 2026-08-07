@@ -4,154 +4,121 @@ import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import {
-  ElCard,
-  ElCol,
-  ElEmpty,
-  ElMessage,
-  ElRow,
-  ElStatistic,
-  ElTable,
-  ElTableColumn,
-  ElTag,
-} from 'element-plus';
+import { ElCard, ElCol, ElRow, ElStatistic } from 'element-plus';
 
 import { getScanStatsApi } from '#/api/sail/scans';
+import { getFindingsApi } from '#/api/sail/findings';
+import SailProTable from '#/components/sail-pro-table/index.vue';
+import type { SailColumn } from '#/components/sail-pro-table/types';
+import { fmtTime } from '#/utils/formatters';
 
 defineOptions({ name: 'DashboardAnalytics' });
 
 const router = useRouter();
+const stats = ref<any>({});
+const topFindings = ref<any[]>([]);
 
-// 后端返回 snake_case 字段，用 any 避免类型摩擦
-const stats = ref<any>({
-  total_scans: 0,
-  running_scans: 0,
-  total_findings: 0,
-  high_risk_findings: 0,
-  total_repositories: 0,
-  total_api_assets: 0,
+const scanColumns: SailColumn[] = [
+  { prop: 'id', label: 'ID', width: 60 },
+  { prop: 'repository_name', label: '仓库', width: 120 },
+  { prop: 'status', label: '状态', width: 110, tag: true },
+  { prop: 'progress', label: '进度', width: 70 },
+  { prop: 'build_quality', label: '构建', width: 130 },
+  {
+    prop: 'started_at',
+    label: '开始',
+    width: 140,
+    formatter: (r) => fmtTime(r.started_at),
+  },
+];
+const findingColumns: SailColumn[] = [
+  { prop: 'id', label: 'ID', width: 60 },
+  { prop: 'title', label: '标题', minWidth: 200 },
+  { prop: 'severity', label: '严重度', width: 80, tag: true },
+  { prop: 'file_path', label: '文件', minWidth: 160 },
+];
+
+onMounted(async () => {
+  stats.value = (await getScanStatsApi()) as any;
+  const fdata = (await getFindingsApi({
+    severity: 'HIGH,CRITICAL',
+    page: 1,
+    page_size: 10,
+  } as any)) as any;
+  topFindings.value = fdata?.items ?? [];
 });
-const recentScans = ref<any[]>([]);
-const loading = ref(false);
 
-async function loadStats() {
-  loading.value = true;
-  try {
-    const data = (await getScanStatsApi()) as any;
-    stats.value = data ?? stats.value;
-    recentScans.value = data?.recent_scans ?? [];
-  } catch (error: any) {
-    ElMessage.error(error?.message || '加载概览统计失败');
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(() => {
-  loadStats();
-});
-
-type TagType = 'danger' | 'info' | 'primary' | 'success' | 'warning';
-
-const statusTagType: Record<string, TagType> = {
-  SUCCEEDED: 'success',
-  RUNNING: 'warning',
-  FAILED: 'danger',
-  PARTIAL_SUCCEEDED: 'info',
-  CANCELLED: 'info',
-  CREATED: 'info',
-  QUEUED: 'info',
-};
-
-function goScanDetail(row: any) {
+function goScan(row: any) {
   router.push(`/scans/${row.id}`).catch(() => {});
+}
+function goFinding(row: any) {
+  router.push(`/findings/${row.id}`).catch(() => {});
 }
 </script>
 
 <template>
-  <Page description="SAIL 扫描平台概览" title="概览">
-    <div class="p-4">
-      <!-- 统计卡片 -->
-      <ElRow :gutter="16" class="mb-4">
+  <Page description="SAIL 扫描平台概览" title="概览大盘">
+    <div class="p-4 space-y-4">
+      <ElRow :gutter="16">
         <ElCol :span="4">
-          <ElCard shadow="hover">
-            <ElStatistic title="累计扫描" :value="stats.total_scans" />
+          <ElCard shadow="never">
+            <ElStatistic title="扫描总数" :value="stats.total_scans" />
           </ElCard>
         </ElCol>
         <ElCol :span="4">
-          <ElCard shadow="hover">
-            <ElStatistic title="进行中扫描" :value="stats.running_scans" />
+          <ElCard shadow="never">
+            <ElStatistic title="运行中" :value="stats.running_scans" />
           </ElCard>
         </ElCol>
         <ElCol :span="4">
-          <ElCard shadow="hover">
-            <ElStatistic title="累计漏洞" :value="stats.total_findings" />
+          <ElCard shadow="never">
+            <ElStatistic title="漏洞总数" :value="stats.total_findings" />
           </ElCard>
         </ElCol>
         <ElCol :span="4">
-          <ElCard shadow="hover">
+          <ElCard shadow="never">
             <ElStatistic
-              title="高危漏洞"
+              title="高危"
               :value="stats.high_risk_findings"
               value-style="color: #f56c6c"
             />
           </ElCard>
         </ElCol>
         <ElCol :span="4">
-          <ElCard shadow="hover">
+          <ElCard shadow="never">
             <ElStatistic title="仓库数" :value="stats.total_repositories" />
           </ElCard>
         </ElCol>
         <ElCol :span="4">
-          <ElCard shadow="hover">
-            <ElStatistic title="API 资产" :value="stats.total_api_assets" />
+          <ElCard shadow="never">
+            <ElStatistic title="API资产" :value="stats.total_api_assets" />
           </ElCard>
         </ElCol>
       </ElRow>
 
-      <!-- 最近扫描 -->
       <ElCard shadow="never">
-        <template #header>
-          <span>最近扫描</span>
-        </template>
-        <ElTable
-          v-if="recentScans.length > 0"
-          v-loading="loading"
-          :data="recentScans"
-          stripe
-          @row-click="goScanDetail"
-        >
-          <ElTableColumn label="扫描 ID" prop="id" width="90" />
-          <ElTableColumn label="状态" width="160">
-            <template #default="{ row }">
-              <ElTag :type="statusTagType[row.status] || 'info'">
-                {{ row.status || '—' }}
-              </ElTag>
-            </template>
-          </ElTableColumn>
-          <ElTableColumn label="进度" width="100">
-            <template #default="{ row }">
-              {{ row.progress ?? 0 }}%
-            </template>
-          </ElTableColumn>
-          <ElTableColumn
-            label="构建质量"
-            prop="build_quality"
-            width="120"
-          />
-          <ElTableColumn
-            label="当前阶段"
-            prop="current_stage"
-            min-width="140"
-          />
-          <ElTableColumn label="模式" prop="mode" width="100" />
-          <ElTableColumn
-            label="开始时间"
-            prop="started_at"
-            width="180"
-          />
-        </ElTable>
-        <ElEmpty v-else v-loading="loading" description="暂无扫描记录" />
+        <template #header>最近扫描</template>
+        <SailProTable
+          :columns="scanColumns"
+          :fetcher="
+            async () => ({
+              items: stats.recent_scans || [],
+              total: stats.recent_scans?.length || 0,
+            })
+          "
+          :filters="[]"
+          @row-click="goScan"
+        />
+      </ElCard>
+
+      <ElCard shadow="never">
+        <template #header>高危漏洞 Top10</template>
+        <SailProTable
+          :columns="findingColumns"
+          :fetcher="async () => ({ items: topFindings, total: topFindings.length })"
+          :filters="[]"
+          @row-click="goFinding"
+        />
       </ElCard>
     </div>
   </Page>
