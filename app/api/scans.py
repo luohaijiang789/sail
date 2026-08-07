@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.api.pagination import paginate
 from app.api.schemas.common import PaginationParams
-from app.api.schemas.scan import ScanCreate, ScanOut, ScanStatsOut, StageOut
+from app.api.schemas.scan import (
+    ScanCreate,
+    ScanLogOut,
+    ScanOut,
+    ScanStatsOut,
+    StageOut,
+)
 from app.application.create_scan import create_scan as create_scan_service
 from app.core.exceptions import ScanRunNotFoundError
 from app.core.logging import get_logger
@@ -215,10 +221,14 @@ def list_stages(
     return [StageOut.model_validate(s) for s in stage_rows]
 
 
-@router.get("/{scan_id}/logs")
-def get_scan_logs(scan_id: int, db: Session = Depends(get_db)) -> StreamingResponse:
-    """流式日志：从 MinIO tail 构建日志并分块返回。"""
-    raise NotImplementedError
+@router.get("/{scan_id}/logs", response_model=ScanLogOut)
+def get_scan_logs(scan_id: int, db: Session = Depends(get_db)) -> ScanLogOut:
+    """流式日志：从 MinIO tail 构建日志并分块返回。
+
+    ponytail: MinIO tail 尚未接入，先返回空日志，前端轮询拿到 200 空列表，
+    面板显示"暂无日志"。接入后改为 StreamingResponse 分块吐出。
+    """
+    return ScanLogOut(scan_run_id=scan_id, lines=[], has_more=False)
 
 
 @router.get("/{scan_id}/events")

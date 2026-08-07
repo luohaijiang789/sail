@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -17,7 +17,13 @@ import {
   ElTag,
 } from 'element-plus';
 
-import { cancelScanApi, getScanApi, retryScanApi } from '#/api/sail/scans';
+import {
+  cancelScanApi,
+  getScanApi,
+  getScanLogsApi,
+  retryScanApi,
+  subscribeScanEventsApi,
+} from '#/api/sail/scans';
 
 defineOptions({ name: 'ScanDetail' });
 
@@ -102,7 +108,59 @@ async function retryScan() {
   }
 }
 
-onMounted(loadDetail);
+// 实时日志 + SSE 进度
+const logs = ref<string[]>([]);
+const logBox = ref<HTMLElement>();
+let logTimer: ReturnType<typeof setInterval> | null = null;
+let es: EventSource | null = null;
+
+async function loadLogs() {
+  try {
+    const data: any = await getScanLogsApi(scanId, { limit: 200 });
+    // ponytail: 后端 ScanLogOut 是 { lines: [...] }，前端类型是 ScanLogLine[]，两种都兜底
+    const raw = Array.isArray(data) ? data : (data?.lines ?? []);
+    logs.value = raw.map((l: any) =>
+      typeof l === 'string'
+        ? l
+        : `[${l.level || 'INFO'}] ${l.message || ''}`,
+    );
+    await nextTick();
+    if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight;
+  } catch {
+    // 日志端点未实现（NotImplementedError → 500），静默；面板显示"暂无日志"
+  }
+}
+
+function startSSE() {
+  if (scan.value?.status !== 'RUNNING') return;
+  es = subscribeScanEventsApi(
+    scanId,
+    (event) => {
+      // ponytail: 后端 ScanEventOut 把 status/progress/stage 放顶层，前端类型说在 payload，两种都接
+      const e: any = (event as any).payload ?? event;
+      if (e.status) scan.value.status = e.status;
+      if (e.progress != null) scan.value.progress = e.progress;
+      if (e.stage) scan.value.current_stage = e.stage;
+    },
+    () => {
+      // SSE 端点未实现时会反复 error，关闭以避免刷屏
+      es?.close();
+      es = null;
+    },
+  );
+}
+
+onMounted(async () => {
+  await loadDetail();
+  loadLogs();
+  logTimer = setInterval(loadLogs, 3000);
+  startSSE();
+});
+
+onUnmounted(() => {
+  if (logTimer) clearInterval(logTimer);
+  es?.close();
+});
 </script>
 
 <template>
@@ -203,6 +261,25 @@ onMounted(loadDetail);
             </template>
           </ElTableColumn>
         </ElTable>
+      </ElCard>
+
+      <!-- 实时进度（RUNNING 时显示） -->
+      <ElCard v-if="scan?.status === 'RUNNING'" shadow="never" class="mb-4">
+        <template #header>实时进度</template>
+        <ElProgress :percentage="scan.progress ?? 0" status="warning" />
+        <p class="mt-2 text-sm">当前阶段：{{ scan.current_stage || '-' }}</p>
+      </ElCard>
+
+      <!-- 构建日志 -->
+      <ElCard shadow="never" class="mb-4">
+        <template #header>构建日志</template>
+        <div
+          ref="logBox"
+          class="h-64 overflow-auto rounded bg-gray-900 p-3 font-mono text-xs text-gray-100"
+        >
+          <div v-for="(line, i) in logs" :key="i">{{ line }}</div>
+          <div v-if="logs.length === 0" class="text-gray-500">暂无日志</div>
+        </div>
       </ElCard>
 
       <!-- 底部：操作 -->
