@@ -91,7 +91,7 @@ export async function getApiAssetFindingsApi(
   assetId: number,
   params?: PageQuery,
 ) {
-  return requestClient.get<PageResult<any>>(
+  return requestClient.get<any[]>(
     `/api-assets/${assetId}/findings`,
     { params },
   );
