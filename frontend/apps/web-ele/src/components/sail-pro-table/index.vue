@@ -1,7 +1,7 @@
 <!-- frontend/apps/web-ele/src/components/sail-pro-table/index.vue -->
 <script lang="ts" setup>
-import { ref, watch, onMounted } from 'vue';
-import { ElTable, ElTableColumn, ElTag, ElEmpty, ElPagination } from 'element-plus';
+import { ref, onMounted } from 'vue';
+import { ElTable, ElTableColumn, ElTag, ElPagination } from 'element-plus';
 import FilterBar from './filter-bar.vue';
 import { statusTagType } from '#/utils/status-colors';
 import type { SailColumn, SailFetcher, SailFilter } from './types';
@@ -61,6 +61,7 @@ async function loadData() {
     data.value = result.items ?? [];
     total.value = result.total ?? 0;
   } catch (e: any) {
+    console.error('SailProTable fetch failed:', e);
     data.value = [];
     total.value = 0;
   } finally {
@@ -84,8 +85,10 @@ function onPageSizeChange(s: number) {
   loadData();
 }
 
+// 同步初始化 filter 默认值，避免 FilterBar 首帧访问 form[f.field].min 崩溃
+initFilters();
+
 onMounted(() => {
-  initFilters();
   loadData();
 });
 </script>
@@ -131,7 +134,6 @@ onMounted(() => {
       <!-- 操作列插槽 -->
       <slot name="actions" />
     </ElTable>
-    <ElEmpty v-if="!loading && data.length === 0" description="暂无数据" />
     <div v-if="total > 0" class="mt-4 flex justify-end">
       <ElPagination
         :current-page="page"

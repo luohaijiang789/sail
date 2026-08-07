@@ -1,6 +1,6 @@
 <!-- frontend/apps/web-ele/src/components/sail-pro-table/filter-bar.vue -->
 <script lang="ts" setup>
-import { reactive, watch } from 'vue';
+import { reactive, watch, onUnmounted } from 'vue';
 import { ElForm, ElFormItem, ElInput, ElSelect, ElOption, ElButton } from 'element-plus';
 import type { SailFilter } from './types';
 
@@ -32,6 +32,8 @@ function reset() {
   }
   emitChange();
 }
+
+onUnmounted(() => clearTimeout(timer));
 </script>
 
 <template>
