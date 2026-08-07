@@ -78,12 +78,13 @@ const formSchema = computed((): VbenFormSchema[] => {
       label: $t('authentication.password'),
       rules: z.string().min(1, { message: $t('authentication.passwordTip') }),
     },
+    // 开发环境关闭滑块验证（SAIL 后端为 mock 认证，任意账密可登）。
+    // 生产环境如需验证码，恢复上方 markRaw(SliderCaptcha) 字段。
     {
-      component: markRaw(SliderCaptcha),
+      component: 'VbenInput',
+      componentProps: { type: 'hidden' },
       fieldName: 'captcha',
-      rules: z.boolean().refine((value) => value, {
-        message: $t('authentication.verifyRequiredTip'),
-      }),
+      defaultValue: true,
     },
   ];
 });
