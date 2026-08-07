@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import api_assets, feedback, findings, internal, mock_auth, repositories, scans
+from app.api import api_assets, check_matrix, feedback, findings, internal, mock_auth, repositories, scans
 from app.api.errors import register_exception_handlers
 from app.api.response_wrapper import ResponseWrapperMiddleware
 from app.core.logging import setup_logging
@@ -33,6 +33,7 @@ app.include_router(api_assets.router, prefix="/api/api-assets", tags=["api-asset
 app.include_router(findings.router, prefix="/api/findings", tags=["findings"])
 app.include_router(feedback.router, prefix="/api", tags=["feedback"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
+app.include_router(check_matrix.router, tags=["check-matrix"])
 # 开发用 mock 认证（vben-admin 前端登录所需），见 app/api/mock_auth.py
 app.include_router(mock_auth.router, tags=["mock-auth"])
 
