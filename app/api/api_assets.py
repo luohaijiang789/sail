@@ -121,13 +121,21 @@ def list_api_assets(
     asset_ids = [a.id for a in page.items]
 
     scores: dict[int, int] = {}
+    levels: dict[int, str] = {}
     finding_counts: dict[int, int] = {}
     if asset_ids:
+        # ponytail: 取全部 profile 行按 id 升序，dict 覆盖到最后一行即"最新画像"
         score_rows = db.execute(
-            select(ApiSecurityProfile.api_asset_id, ApiSecurityProfile.overall_score)
+            select(
+                ApiSecurityProfile.api_asset_id,
+                ApiSecurityProfile.overall_score,
+                ApiSecurityProfile.overall_level,
+            )
             .where(ApiSecurityProfile.api_asset_id.in_(asset_ids))
+            .order_by(ApiSecurityProfile.id)
         ).all()
         scores = {row[0]: row[1] for row in score_rows}
+        levels = {row[0]: row[2] for row in score_rows}
 
         count_rows = db.execute(
             select(Finding.api_asset_id, func.count(Finding.id))
@@ -141,8 +149,11 @@ def list_api_assets(
             id=a.id,
             http_method=a.http_method,
             path=a.path,
+            full_path=a.full_path,
             controller_class=a.controller_class,
+            call_chain_depth=a.call_chain_depth,
             overall_score=scores.get(a.id),
+            overall_level=levels.get(a.id),
             finding_count=finding_counts.get(a.id, 0),
             param_count=len(a.parameters_json) if a.parameters_json else 0,
             status=a.status,

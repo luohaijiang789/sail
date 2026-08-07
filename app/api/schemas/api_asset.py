@@ -35,7 +35,7 @@ class ApiAssetOut(BaseModel):
     end_line: int | None
     consumes: str | None
     produces: str | None
-    parameters_json: dict | None
+    parameters_json: dict | list | None
     response_type: str | None
     declared_exceptions: str | None
     module: str | None
@@ -53,15 +53,18 @@ class ApiAssetOut(BaseModel):
 
 
 class ApiAssetListOut(BaseModel):
-    """API 资产列表精简版：方法/路径/控制器/安全分/漏洞数/状态。"""
+    """API 资产列表精简版：方法/路径/控制器/调用链/安全分/等级/漏洞数/状态。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     http_method: str
     path: str
+    full_path: str | None = None
     controller_class: str
+    call_chain_depth: int | None = None
     overall_score: int | None = Field(default=None, description="安全画像总分，无画像时为 None")
+    overall_level: str | None = Field(default=None, description="SAFE/LOW_RISK/.../CRITICAL，无画像时为 None")
     finding_count: int = Field(default=0, description="关联漏洞数")
     param_count: int = 0
     status: str
